@@ -105,30 +105,51 @@ def touched(hunks):
 CLASS_BY_MODULE = {}
 GROUP_DIRS = ("dialects", "parsers", "generators", "tokenizers", "typing")
 
+_ast_cache = {}
+def parse_cached(text):
+    key = hash(text)
+    if key not in _ast_cache:
+        _ast_cache.clear()
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            tree = None
+        _ast_cache[key] = (tree, None)
+    return _ast_cache[key][0]
+
+def stmt_spans(text):
+    key = hash(text)
+    tree = parse_cached(text)
+    if tree is None:
+        return None
+    if _ast_cache[key][1] is None:
+        spans = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.stmt):
+                body = []
+                for fld in ("body", "orelse", "finalbody", "handlers"):
+                    for ch in getattr(node, fld, []) or []:
+                        body.append((ch.lineno, ch.end_lineno or ch.lineno))
+                spans.append((node.lineno, node.end_lineno or node.lineno, body))
+        _ast_cache[key] = (tree, spans)
+    return _ast_cache[key][1]
+
 def stmt_starts(text, lns):
     """All header lines of the innermost statement around each line (a changed operator
     can matter to any test that reached the statement)."""
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
+    spans = stmt_spans(text)
+    if spans is None:
         return set()
-    spans = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.stmt):
-            body_lines = set()
-            for fld in ("body", "orelse", "finalbody", "handlers"):
-                for ch in getattr(node, fld, []) or []:
-                    body_lines.update(range(ch.lineno, (ch.end_lineno or ch.lineno) + 1))
-            spans.append((node.lineno, node.end_lineno or node.lineno, body_lines))
+    inbody = lambda x, body: any(a <= x <= b for a, b in body)
     out = set()
     for ln in lns:
         best = None
         for s, e, body in spans:
-            if s <= ln <= e and ln not in body and (best is None or s > best[0]):
+            if s <= ln <= e and (best is None or s > best[0]) and not inbody(ln, body):
                 best = (s, e, body)
         if best is not None:
             s, e, body = best
-            out.update(x for x in range(s, e + 1) if x not in body)
+            out.update(x for x in range(s, e + 1) if not inbody(x, body))
     return out
 
 def stem_of(path):
@@ -166,9 +187,8 @@ def descendants(stem):
 def try_lines(text, lns):
     """For changes inside a try statement (handlers, else, finally), every line of the
     try body: tests that entered the try can be affected."""
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
+    tree = parse_cached(text)
+    if tree is None:
         return set()
     out = set()
     for node in ast.walk(tree):
@@ -199,7 +219,7 @@ def import_ok(changed):
         code = ("import sys; sys.path.insert(0, %r)\nimport importlib, sqlglot\n"
                 "for m in %r: importlib.import_module(m)\n" % (str(root), mods))
         r = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True,
-                           timeout=60, cwd=str(root))
+                           timeout=25, cwd=str(root))
         ok = r.returncode == 0
     except Exception as e:
         log("import check error", repr(e)); ok = False
@@ -285,6 +305,8 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                     continue  # comment / blank-line only
             except (tokenize.TokenError, IndentationError, SyntaxError):
                 return ALL
+            if not old_text.strip():
+                return ALL  # code added to an empty file: no coverage to go on
             fl = LINES.get(path, {})
             imp = IMP.get(path, set())
             lns = touched(hunks)
@@ -298,9 +320,16 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                         sel |= mask
             if any(ln in imp for ln in lns):
                 import_checks[path] = new_text
+            done_fb = set()
             for ln in lns:
                 if ln in imp:
+                    fb_key = stem_of(path) or enclosing_classes(old_text, ln)
+                    if fb_key in done_fb:
+                        continue
+                    done_fb.add(fb_key)
                     sel |= import_fallback(path, filemask, by_file, ALL, old_text, ln, CLASSES)
+                    if sel == ALL:
+                        return ALL
                 v = fl.get(str(ln))
                 if v:
                     sel |= int(v, 16)
@@ -316,9 +345,8 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
 
 def enclosing_classes(text, ln):
     """Qualified name of the innermost class whose body (outside any function) holds ln."""
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
+    tree = parse_cached(text)
+    if tree is None:
         return None
     best = None
     def walk(node, prefix):
