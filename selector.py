@@ -408,6 +408,88 @@ def scope_changed_lines(old_text, new_text):
             out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
     return out
 
+_KW = re.compile(r"^(\s*)(if|elif|else|for|while|try|except|finally|with|return|yield|break|continue|raise|match|case)\b")
+
+def _struct_sig(lines):
+    out = []
+    for l in lines:
+        m = _KW.match(l)
+        if m:
+            out.append((len(m.group(1).expandtabs()), m.group(2)))
+    return out
+
+def structure_changed_lines(old_text, new_text, hunks):
+    """Every line of each function whose control-flow skeleton changed (an elif turned
+    into if, a statement moved out of a guard, a return removed...), compared function
+    by function so unrelated edits cannot cancel out. Also any line whose indentation
+    changed."""
+    to = parse_cached(old_text)
+    try:
+        tn = ast.parse(new_text)
+    except SyntaxError:
+        return None
+    if to is None:
+        return None
+    ol, nl = old_text.split("\n"), new_text.split("\n")
+    fo, fn_ = _functions(to), _functions(tn)
+    out = set()
+    for q, node in fo.items():
+        other = fn_.get(q)
+        if other is None:
+            continue
+        a = ol[node.lineno - 1:node.end_lineno]
+        b = nl[other.lineno - 1:other.end_lineno]
+        if _struct_sig(a) != _struct_sig(b):
+            out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    # indentation moves: the same text removed at one depth and added at another
+    rem = {}
+    for ostart, body in hunks:
+        o = ostart
+        for tag, line in body:
+            if tag == "-":
+                rem.setdefault(line.strip(), []).append((o, len(line) - len(line.lstrip())))
+            if tag != "+":
+                o += 1
+    for ostart, body in hunks:
+        for tag, line in body:
+            if tag == "+" and line.strip() in rem:
+                ind = len(line) - len(line.lstrip())
+                for o, oind in rem[line.strip()]:
+                    if oind != ind:
+                        for q, node in fo.items():
+                            if node.lineno <= o <= (node.end_lineno or node.lineno):
+                                out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return out
+
+_SAFE_OPERAND = r"(?:None|True|False|[A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*\.[A-Z][A-Z0-9_]*)"
+
+def _canon_identity(line):
+    s = re.sub(r"\bis not (" + _SAFE_OPERAND + r")\b", r"!= \1", line)
+    s = re.sub(r"\bis (" + _SAFE_OPERAND + r")\b", r"== \1", s)
+    s = re.sub(r"(" + _SAFE_OPERAND + r") is not\b", r"\1 !=", s)
+    s = re.sub(r"(" + _SAFE_OPERAND + r") is\b", r"\1 ==", s)
+    return s
+
+def identity_equality_only(hunks):
+    """True when every change only swaps `is`/`is not` for `==`/`!=` against None,
+    True, False or an enum member (UPPER_CASE attribute of a CamelCase name): for the
+    objects sqlglot compares this way the two spellings give the same result."""
+    rem, add = [], []
+    for _, body in hunks:
+        for tag, line in body:
+            if tag == "-":
+                rem.append(line)
+            elif tag == "+":
+                add.append(line)
+    if not rem or len(rem) != len(add):
+        return False
+    for a, b in zip(rem, add):
+        if a == b or _canon_identity(a) != _canon_identity(b):
+            return False
+        if not re.search(r"\bis\b", a + b):
+            return False
+    return True
+
 def try_lines(text, lns):
     """For changes inside a try statement (handlers, else, finally), every line of the
     try body: tests that entered the try can be affected."""
@@ -593,6 +675,8 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                 return ALL
             if not old_text.strip():
                 return ALL  # code added to an empty file: no coverage to go on
+            if identity_equality_only(hunks):
+                continue  # `is None` <-> `== None` and `is Enum.MEMBER` <-> `== Enum.MEMBER`
             fl = LINES.get(path, {})
             imp = IMP.get(path, set())
             lns = touched(hunks)
@@ -609,6 +693,10 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                         a_, b_ = fn_.lineno, fn_.end_lineno or fn_.lineno
                         if any(a_ <= x <= b_ for x in lns) and "cache" in "\n".join(src_lines[a_ - 1:b_]).lower():
                             lns |= set(range(a_, b_ + 1))
+            st_ = structure_changed_lines(old_text, new_text, hunks)
+            if st_ is None:
+                return ALL
+            lns |= st_
             sc = scope_changed_lines(old_text, new_text)
             if sc is None:
                 return ALL
@@ -709,8 +797,8 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                 pass
             for tf in test_files_closure([path]):
                 sel |= by_file.get(tf, 0)
-        elif path in READS:
-            pass  # readers already added above
+        elif READS.get(path):
+            pass  # readers already added above (a file with no credited reader runs all)
         elif path in by_file:
             sel |= by_file[path]
         else:
