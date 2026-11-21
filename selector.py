@@ -219,7 +219,8 @@ def outside_functions(text, lns):
                 walk(ch.body, prefix + ch.name + ".")
             elif isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 top = min([s] + [d.lineno for d in ch.decorator_list])
-                b0 = ch.body[0].lineno
+                f0 = ch.body[0]
+                b0 = min([f0.lineno] + [d.lineno for d in getattr(f0, "decorator_list", [])])
                 mark(top, b0 - 1 if b0 > s else s, prefix)  # decorators, signature, defaults
             elif isinstance(ch, ast.If) and "TYPE_CHECKING" in ast.dump(ch.test) and not ch.orelse:
                 continue  # never runs
@@ -229,7 +230,7 @@ def outside_functions(text, lns):
                 for fld in ("body", "orelse", "finalbody"):
                     walk(getattr(ch, fld, []) or [], prefix)
                 for h in getattr(ch, "handlers", []) or []:
-                    mark(h.lineno, h.lineno, prefix)
+                    mark(h.lineno, max(h.lineno, h.body[0].lineno - 1), prefix)
                     walk(h.body, prefix)
             else:
                 mark(s, e, prefix)
@@ -293,9 +294,14 @@ def top_names(text):
                     names.add((a.asname or a.name).split(".")[0])
             elif isinstance(n, ast.If):
                 if "TYPE_CHECKING" in ast.dump(n.test):
-                    continue  # never runs
+                    stmts(n.orelse)  # the body never runs
+                    continue
                 stmts(n.body); stmts(n.orelse)
-            elif isinstance(n, ast.Try):
+            elif isinstance(n, ast.Delete):
+                for t in n.targets:
+                    if isinstance(t, ast.Name):
+                        names.discard(t.id)
+            elif isinstance(n, (ast.Try, getattr(ast, "TryStar", ast.Try))):
                 stmts(n.body); stmts(n.orelse); stmts(n.finalbody)
                 for h in n.handlers:
                     stmts(h.body)
@@ -345,6 +351,62 @@ def registry_owner_mask(lines, CLASSES):
         log("registry check error", repr(e))
         return None
     return m
+
+def _scope_sig(fn):
+    """What Python decides once for a whole function: generator or not, which names
+    are local, global or nonlocal. Changing it in a branch affects every call."""
+    locs, decl, gen = set(), set(), False
+    todo = list(fn.body)
+    while todo:
+        n = todo.pop()
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            if not isinstance(n, ast.Lambda):
+                locs.add(n.name)
+            continue
+        if isinstance(n, (ast.Yield, ast.YieldFrom, ast.Await)):
+            gen = True
+        if isinstance(n, (ast.Global, ast.Nonlocal)):
+            decl.update((type(n).__name__, x) for x in n.names)
+        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            locs.add(n.id)
+        if isinstance(n, ast.alias):
+            locs.add((n.asname or n.name).split(".")[0])
+        if isinstance(n, (ast.ExceptHandler,)) and n.name:
+            locs.add(n.name)
+        todo.extend(ast.iter_child_nodes(n))
+    return (frozenset(locs), frozenset(decl), gen)
+
+def _functions(tree):
+    out = {}
+    def walk(node, prefix):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                q = prefix + ch.name
+                out.setdefault(q, ch)
+                walk(ch, q + ".")
+            elif isinstance(ch, ast.ClassDef):
+                walk(ch, prefix + ch.name + ".")
+            else:
+                walk(ch, prefix)
+    walk(tree, "")
+    return out
+
+def scope_changed_lines(old_text, new_text):
+    """Every line of each function whose scope signature changed."""
+    to = parse_cached(old_text)
+    try:
+        tn = ast.parse(new_text)
+    except SyntaxError:
+        return None
+    if to is None:
+        return None
+    fo, fn_ = _functions(to), _functions(tn)
+    out = set()
+    for q, node in fo.items():
+        other = fn_.get(q)
+        if other is not None and _scope_sig(node) != _scope_sig(other):
+            out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return out
 
 def try_lines(text, lns):
     """For changes inside a try statement (handlers, else, finally), every line of the
@@ -406,7 +468,10 @@ def _forked_check(changed, types):
                             q = f"sqlglot/{d}/{dsc}.py"
                             if q not in changed and (SRC / q).exists():
                                 extra.append((q, (SRC / q).read_text()))
-            seq = [(p_, t_, False) for p_, t_ in items + extra] + [(p_, t_, True) for p_, t_ in items + extra]
+            seen_q = set(); extra = [x for x in extra if not (x[0] in seen_q or seen_q.add(x[0]))]
+            allm = items + extra
+            # lenient passes settle the order of inheritance chains; the last must succeed
+            seq = [(p_, t_, False) for p_, t_ in allm] * 3 + [(p_, t_, True) for p_, t_ in allm]
             for path, text, strict in seq:  # 1st pass may hit stale order; 2nd pass must succeed
                 name = path[:-3].replace("/", ".")
                 is_pkg = name.endswith(".__init__")
@@ -533,6 +598,10 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
             lns = touched(hunks)
             lns |= stmt_starts(old_text, lns)
             lns |= try_lines(old_text, lns)
+            sc = scope_changed_lines(old_text, new_text)
+            if sc is None:
+                return ALL
+            lns |= sc
             kw = lambda ls: sorted(m.group(1) for l in ls
                                    for m in [re.match(r"\s*(if|elif|else)\b", l)] if m)
             if kw(old_lines) != kw(new_lines):
