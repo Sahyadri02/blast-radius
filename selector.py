@@ -102,6 +102,7 @@ def touched(hunks):
                 out.add(o)
     return out
 
+CLASS_BY_MODULE = {}
 GROUP_DIRS = ("dialects", "parsers", "generators", "tokenizers", "typing")
 
 def stmt_starts(text, lns):
@@ -162,6 +163,54 @@ def descendants(stem):
                 seen.add(c); todo.append(c)
     return seen
 
+def try_lines(text, lns):
+    """For changes inside a try statement (handlers, else, finally), every line of the
+    try body: tests that entered the try can be affected."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Try, getattr(ast, "TryStar", ast.Try))):
+            s, e = node.lineno, node.end_lineno or node.lineno
+            if any(s <= ln <= e for ln in lns):
+                out.update(range(s, (node.body[-1].end_lineno or s) + 1))
+    return out
+
+_import_root = None
+def import_ok(changed):
+    """Import every changed module from a patched copy of the source. False on failure."""
+    global _import_root
+    import shutil, subprocess, tempfile
+    try:
+        if _import_root is None:
+            _import_root = tempfile.mkdtemp(prefix="br_")
+            for d, _, files in os.walk(SRC / "sqlglot"):
+                rel = os.path.relpath(d, SRC)
+                os.makedirs(os.path.join(_import_root, rel), exist_ok=True)
+                for fn in files:
+                    if fn.endswith(".py") or fn.endswith(".typed"):
+                        shutil.copyfile(os.path.join(d, fn), os.path.join(_import_root, rel, fn))
+        root = Path(_import_root)
+        for path, text in changed.items():
+            (root / path).write_text(text)
+        mods = [p[:-3].replace("/", ".").removesuffix(".__init__") for p in changed]
+        code = ("import sys; sys.path.insert(0, %r)\nimport importlib, sqlglot\n"
+                "for m in %r: importlib.import_module(m)\n" % (str(root), mods))
+        r = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True,
+                           timeout=60, cwd=str(root))
+        ok = r.returncode == 0
+    except Exception as e:
+        log("import check error", repr(e)); ok = False
+    finally:
+        try:
+            for path in changed:
+                shutil.copyfile(SRC / path, Path(_import_root) / path)
+        except Exception:
+            _import_root = None
+    return ok
+
 def code_tokens(text):
     toks = []
     for t in tokenize.generate_tokens(io.StringIO(text).readline):
@@ -182,6 +231,8 @@ def main():
     LINES = M["lines"]; IMP = {f: set(v) for f, v in M["import"].items()}
     READS = {p: int(m, 16) for p, m in M["reads"].items()}
     CLASSES = {c: int(m, 16) for c, m in M.get("classes", {}).items()}
+    for c, m in CLASSES.items():
+        CLASS_BY_MODULE.setdefault(c.split(":")[0] + ":", []).append((c, m))
     filemask_cache = {}
     def filemask(path):
         if path not in filemask_cache:
@@ -205,7 +256,11 @@ def main():
 
 def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
     sel = 0
+    import_checks = {}
     for path, f in parse_patch(text).items():
+        # Some tests read source files as data (e.g. test_typing reads sqlglot/typing/*.py),
+        # so a file's readers always count, even for comment-only edits.
+        sel |= READS.get(path, 0) | READS.get(f.get("old") or "", 0)
         if f["binary"] or f["old"] is None or f["new"] is None or f["old"] != f["new"]:
             return ALL  # added/deleted/renamed/binary: be safe
         hunks = f["hunks"]
@@ -217,7 +272,13 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
             new_text = apply(old_text, hunks)
             try:
                 compile(new_text, path, "exec")
-            except SyntaxError:
+                # bytes, like the import system: catches coding declarations
+                compile(new_text.encode("utf-8"), path, "exec")
+            except (SyntaxError, ValueError, UnicodeError):
+                return ALL
+            new_lines = [l for _, b in hunks for t, l in b if t == "+"]
+            old_lines = [l for _, b in hunks for t, l in b if t == "-"]
+            if any(re.match(r"^[ \t\f]*#.*?coding[:=]", l) for l in new_lines + old_lines):
                 return ALL
             try:
                 if code_tokens(old_text) == code_tokens(new_text):
@@ -228,6 +289,15 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
             imp = IMP.get(path, set())
             lns = touched(hunks)
             lns |= stmt_starts(old_text, lns)
+            lns |= try_lines(old_text, lns)
+            if any("_sql_names" in l for l in new_lines + old_lines):
+                # function-name registry: tests that built anonymous functions may now
+                # resolve to (or stop resolving to) a real class
+                for key, mask in CLASSES.items():
+                    if key.endswith((":Anonymous", ":AnonymousAggFunc")):
+                        sel |= mask
+            if any(ln in imp for ln in lns):
+                import_checks[path] = new_text
             for ln in lns:
                 if ln in imp:
                     sel |= import_fallback(path, filemask, by_file, ALL, old_text, ln, CLASSES)
@@ -235,11 +305,13 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                 if v:
                     sel |= int(v, 16)
         elif path in READS:
-            sel |= READS[path]
+            pass  # readers already added above
         elif path in by_file:
             sel |= by_file[path]
         else:
             return ALL
+    if import_checks and sel != ALL and not import_ok(import_checks):
+        return ALL
     return sel
 
 def enclosing_classes(text, ln):
@@ -280,6 +352,12 @@ def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=No
         for d in GROUP_DIRS:
             m |= filemask(f"sqlglot/{d}/{s}.py")
         m |= by_file.get(f"tests/dialects/test_{s}.py", 0)
+        # tests that instantiated any class of this dialect family (e.g. tests that loop
+        # over every dialect and only read its settings)
+        for d in GROUP_DIRS:
+            pre = f"sqlglot.{d}.{s}:"
+            for key, mask in CLASS_BY_MODULE.get(pre, ()):
+                m |= mask
     return m
 
 def split(nums, ms):
