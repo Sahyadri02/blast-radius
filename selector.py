@@ -1012,6 +1012,7 @@ def enclosing_classes(text, ln):
 
 _SRC_LINES = {}
 _SRC_LOWER = {}
+_SRC_TEXT = {}
 def _src_lines():
     if not _SRC_LINES:
         for f in (SRC / "sqlglot").rglob("*.py"):
@@ -1020,6 +1021,7 @@ def _src_lines():
                 txt = f.read_text()
                 _SRC_LINES[rel] = txt.split("\n")
                 _SRC_LOWER[rel] = txt.lower()
+                _SRC_TEXT[rel] = txt
             except Exception:
                 pass
     return _SRC_LINES
@@ -1085,12 +1087,7 @@ def _attr_readers_mask(name, LINES, IMP, by_file):
             if v:
                 m |= int(v, 16)
             # multi-line statement around the reader
-            if tree is None:
-                try:
-                    tree = parse_cached("\n".join(lines))
-                except Exception:
-                    return None
-            for x in stmt_starts("\n".join(lines), {h}):
+            for x in stmt_starts(_SRC_TEXT[rel], {h}):
                 if x in imp:
                     return None
                 v = fl.get(str(x))
