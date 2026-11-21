@@ -354,6 +354,12 @@ def registry_owner_mask(lines, CLASSES):
         return None
     return m
 
+def _body_start(fn):
+    """First line of a function's body (after decorators, signature and defaults,
+    which run at import time and are handled by the import-time rules)."""
+    b = fn.body[0]
+    return min([b.lineno] + [d.lineno for d in getattr(b, "decorator_list", [])])
+
 def _scope_sig(fn):
     """What Python decides once for a whole function: generator or not, which names
     are local, global or nonlocal. Changing it in a branch affects every call."""
@@ -422,7 +428,7 @@ def scope_changed_lines(old_text, new_text):
     for q, node in fo.items():
         other = fn_.get(q)
         if other is not None and _scope_sig(node) != _scope_sig(other):
-            out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+            out.update(range(_body_start(node), (node.end_lineno or node.lineno) + 1))
     return out
 
 _KW = re.compile(r"^(\s*)(if|elif|else|for|while|try|except|finally|with|return|yield|break|continue|raise|match|case)\b")
@@ -466,7 +472,7 @@ def structure_changed_lines(old_text, new_text, hunks):
         b = nl[other.lineno - 1:other.end_lineno]
         sa, sb = _struct_sig(a), _struct_sig(b)
         if sa is None or sb is None or sa != sb:
-            out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+            out.update(range(_body_start(node), (node.end_lineno or node.lineno) + 1))
     # indentation moves: the same text removed at one depth and added at another
     rem = {}
     for ostart, body in hunks:
@@ -484,7 +490,7 @@ def structure_changed_lines(old_text, new_text, hunks):
                     if oind != ind:
                         for q, node in fo.items():
                             if node.lineno <= o <= (node.end_lineno or node.lineno):
-                                out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+                                out.update(range(_body_start(node), (node.end_lineno or node.lineno) + 1))
     # a hunk whose removed and added code sits at different depths (moved and edited)
     ind_ = lambda l: len(l.expandtabs()) - len(l.expandtabs().lstrip())
     for ostart, body in hunks:
@@ -496,7 +502,7 @@ def structure_changed_lines(old_text, new_text, hunks):
                 if t == "-":
                     for q, node in fo.items():
                         if node.lineno <= o <= (node.end_lineno or node.lineno):
-                            out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+                            out.update(range(_body_start(node), (node.end_lineno or node.lineno) + 1))
                 if t != "+":
                     o += 1
     return out
@@ -623,6 +629,32 @@ def identity_ast_equal(old_text, new_text):
     except Exception:
         return False
 
+def lambda_body_only_lines(old_text, new_text):
+    """If the two versions differ only inside the bodies of existing lambdas, return
+    the old lines of the changed lambdas; else None."""
+    try:
+        to, tn = ast.parse(old_text), ast.parse(new_text)
+    except SyntaxError:
+        return None
+    def strip(tree):
+        acc = []
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Lambda):
+                acc.append((n.lineno, n.end_lineno or n.lineno, ast.dump(n.body)))
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Lambda):
+                n.body = ast.Constant(None)
+        return ast.dump(tree), acc
+    so, lo = strip(to)
+    sn, ln_ = strip(tn)
+    if so != sn or len(lo) != len(ln_):
+        return None
+    out = set()
+    for (s, e, bo), (_, _, bn) in zip(lo, ln_):
+        if bo != bn:
+            out.update(range(s, e + 1))
+    return out or None
+
 def identity_equality_only(hunks):
     """True when every change only swaps `is`/`is not` for `==`/`!=` against None or a
     member of one of sqlglot's Enum classes, line for line inside each hunk."""
@@ -699,7 +731,7 @@ def _forked_check(changed, types):
             for path in changed:
                 s = stem_of(path)
                 if s:
-                    for dsc in sorted(descendants(s) - {s}):
+                    for dsc in sorted(descendants(s)):
                         for d in ("tokenizers", "typing", "parsers", "generators", "dialects"):
                             q = f"sqlglot/{d}/{dsc}.py"
                             if q not in changed and (SRC / q).exists():
@@ -726,6 +758,21 @@ def _forked_check(changed, types):
                 except BaseException:
                     if strict:
                         raise
+            # build each affected dialect's components (what tests that loop over all
+            # dialects do, e.g. the generator memory test)
+            stems = set()
+            for path in changed:
+                s = stem_of(path)
+                if s:
+                    stems |= descendants(s)
+            if stems:
+                from sqlglot.dialects.dialect import Dialect
+                for klass in list(Dialect._classes.values()):
+                    if klass.__module__.rsplit(".", 1)[-1] in stems:
+                        d = klass()
+                        d.tokenize("SELECT 1")
+                        d.parser()
+                        d.generator()
             code = 0
         except BaseException:
             code = 1
@@ -835,6 +882,18 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                 return ALL
             if not old_text.strip():
                 return ALL  # code added to an empty file: no coverage to go on
+            lam = lambda_body_only_lines(old_text, new_text)
+            if lam is not None:
+                # only the bodies of existing lambdas changed: nothing changes at import
+                # time; the tests that ran those lambda lines are the ones affected
+                fl0 = LINES.get(path, {})
+                for x in stmt_starts(old_text, lam) | lam:
+                    v = fl0.get(str(x))
+                    if v:
+                        sel |= int(v, 16)
+                import_checks[path] = new_text
+                all_new[path] = new_text
+                continue
             if identity_equality_only(hunks) and identity_ast_equal(old_text, new_text):
                 continue  # `is None` <-> `== None` and `is Enum.MEMBER` <-> `== Enum.MEMBER`
             fl = LINES.get(path, {})
@@ -871,7 +930,7 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                     if isinstance(fn_, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         a_, b_ = fn_.lineno, fn_.end_lineno or fn_.lineno
                         if any(a_ <= x <= b_ for x in lns) and "cache" in "\n".join(src_lines[a_ - 1:b_]).lower():
-                            lns |= set(range(a_, b_ + 1))
+                            lns |= set(range(_body_start(fn_), b_ + 1))
             st_ = structure_changed_lines(old_text, new_text, hunks)
             if st_ is None:
                 return ALL
@@ -949,7 +1008,7 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                 else:
                     key = path[:-3].replace("/", ".") + ":" + q if q else None
                     if key and key in CLASSES:
-                        sel |= CLASSES[key] | filemask(path)
+                        sel |= CLASSES[key] | (0 if path.startswith("sqlglot/expressions/") else filemask(path))
                     else:
                         return ALL
             done_fb = set()
@@ -1054,6 +1113,25 @@ def changed_attr(text, ln):
             return None
     return None
 
+_LIT_CACHE = {}
+def literal_users(stem, LINES):
+    if stem in _LIT_CACHE or LINES is None:
+        return _LIT_CACHE.get(stem, 0)
+    pat = re.compile(r"[\"']" + re.escape(stem) + r"[\"']", re.I)
+    m = 0
+    for rel, lines in _src_lines().items():
+        if stem_of(rel) == stem or stem.lower() not in _SRC_LOWER[rel]:
+            continue
+        fl = LINES.get(rel, {})
+        for k, l in enumerate(lines):
+            if pat.search(l):
+                for x in stmt_starts(_SRC_TEXT[rel], {k + 1}) | {k + 1}:
+                    v = fl.get(str(x))
+                    if v:
+                        m |= int(v, 16)
+    _LIT_CACHE[stem] = m
+    return m
+
 _ATTR_CACHE = {}
 def attr_readers_mask(name, LINES, IMP, by_file):
     if name not in _ATTR_CACHE:
@@ -1097,7 +1175,42 @@ def _attr_readers_mask(name, LINES, IMP, by_file):
         m |= by_file.get(tf, 0)
     return m
 
+def foreign_write(text, ln):
+    """A statement at ln that assigns or mutates something reached through another
+    object (a.b.C = ..., a.B.X[k] = ..., x.y.pop(...)) at import time."""
+    tree = parse_cached(text)
+    if tree is None:
+        return True
+    best = None
+    for st in ast.walk(tree):
+        if isinstance(st, ast.stmt) and not isinstance(st, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef, ast.If, ast.For, ast.While, ast.With, ast.Try)):
+            if st.lineno <= ln <= (st.end_lineno or st.lineno):
+                best = st
+    if best is None:
+        return False
+    tgts = []
+    if isinstance(best, ast.Assign):
+        tgts = best.targets
+    elif isinstance(best, (ast.AugAssign, ast.AnnAssign)):
+        tgts = [best.target]
+    elif isinstance(best, ast.Expr) and isinstance(best.value, ast.Call) and isinstance(best.value.func, ast.Attribute):
+        tgts = [best.value.func.value]
+    elif isinstance(best, ast.Delete):
+        tgts = best.targets
+    for t in tgts:
+        while isinstance(t, ast.Subscript):
+            t = t.value
+        if isinstance(t, ast.Attribute):
+            root = t
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if not (isinstance(root, ast.Name) and root.id in ("self", "cls")):
+                return True
+    return False
+
 def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=None):
+    if text is not None and ln is not None and foreign_write(text, ln):
+        return ALL
     stem = stem_of(path)
     if stem is None and text is not None and ln is not None and in_function(text, ln):
         return ALL  # core code that also runs while modules load (e.g. parsing type strings)
@@ -1107,7 +1220,8 @@ def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=No
             if q:
                 key = path[:-3].replace("/", ".") + ":" + q
                 if key in CLASSES:
-                    return CLASSES[key] | filemask(path)
+                    # CLASSES holds every test that built this class or a subclass
+                    return CLASSES[key] | (0 if path.startswith("sqlglot/expressions/") else filemask(path))
         return ALL
     m = 0
     for s in descendants(stem):
@@ -1123,6 +1237,10 @@ def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=No
     # Slow tests that only construct every dialect's components (e.g. the generator
     # memory test) are left out of this broad fallback; a change that breaks component
     # construction also breaks the dialect's own tests, which stay selected.
+    # code elsewhere that names the dialect as a string (e.g. "teradata" passed to a
+    # format helper) reads its settings on behalf of other dialects' tests
+    for s in descendants(stem):
+        m |= literal_users(s, NARROW[0])
     m &= ~WIDE[0]
     # A plain class attribute (WEEK_OFFSET, KEYWORDS, ...) matters only where it is
     # read: narrow to the family's tests that ran a reading line.
