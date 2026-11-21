@@ -104,6 +104,7 @@ def touched(hunks):
     return out
 
 CLASS_BY_MODULE = {}
+NARROW = [None, None]
 TESTIMP = {}
 WIDE = [0]
 GROUP_DIRS = ("dialects", "parsers", "generators", "tokenizers", "typing")
@@ -355,16 +356,28 @@ def registry_owner_mask(lines, CLASSES):
 def _scope_sig(fn):
     """What Python decides once for a whole function: generator or not, which names
     are local, global or nonlocal. Changing it in a branch affects every call."""
-    locs, decl, gen = set(), set(), False
+    locs, decl, gen = set(), set(), 0
     todo = list(fn.body)
     while todo:
         n = todo.pop()
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             if not isinstance(n, ast.Lambda):
                 locs.add(n.name)
+            # decorators, defaults and bases run in this scope
+            todo.extend(getattr(n, "decorator_list", []) or [])
+            a = getattr(n, "args", None)
+            if a is not None:
+                todo.extend(a.defaults); todo.extend(x for x in a.kw_defaults if x is not None)
+            todo.extend(getattr(n, "bases", []) or [])
             continue
-        if isinstance(n, (ast.Yield, ast.YieldFrom, ast.Await)):
-            gen = True
+        if isinstance(n, (ast.Yield, ast.YieldFrom)):
+            gen |= 1
+        if isinstance(n, ast.Await):
+            gen |= 2
+        if isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+            locs.add(n.name)
+        if isinstance(n, ast.MatchMapping) and n.rest:
+            locs.add(n.rest)
         if isinstance(n, (ast.Global, ast.Nonlocal)):
             decl.update((type(n).__name__, x) for x in n.names)
         if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
@@ -382,7 +395,10 @@ def _functions(tree):
         for ch in ast.iter_child_nodes(node):
             if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 q = prefix + ch.name
-                out.setdefault(q, ch)
+                k = 0
+                while (q if k == 0 else f"{q}#{k}") in out:
+                    k += 1
+                out[q if k == 0 else f"{q}#{k}"] = ch
                 walk(ch, q + ".")
             elif isinstance(ch, ast.ClassDef):
                 walk(ch, prefix + ch.name + ".")
@@ -410,12 +426,20 @@ def scope_changed_lines(old_text, new_text):
 
 _KW = re.compile(r"^(\s*)(if|elif|else|for|while|try|except|finally|with|return|yield|break|continue|raise|match|case)\b")
 
+_FLOW = {"if", "elif", "else", "for", "while", "try", "except", "finally", "with",
+         "return", "yield", "break", "continue", "raise", "match", "case", "pass", "await"}
+
 def _struct_sig(lines):
     out = []
-    for l in lines:
-        m = _KW.match(l)
-        if m:
-            out.append((len(m.group(1).expandtabs()), m.group(2)))
+    try:
+        src = "\n".join(lines) + "\n"
+        for t in tokenize.generate_tokens(io.StringIO(src).readline):
+            if t.type == tokenize.NAME and t.string in _FLOW:
+                line = lines[t.start[0] - 1] if t.start[0] - 1 < len(lines) else ""
+                lead = len(line) - len(line.lstrip())
+                out.append((len(line[:lead].expandtabs()), t.start[1] == lead, t.string))
+    except Exception:
+        return None
     return out
 
 def structure_changed_lines(old_text, new_text, hunks):
@@ -439,7 +463,8 @@ def structure_changed_lines(old_text, new_text, hunks):
             continue
         a = ol[node.lineno - 1:node.end_lineno]
         b = nl[other.lineno - 1:other.end_lineno]
-        if _struct_sig(a) != _struct_sig(b):
+        sa, sb = _struct_sig(a), _struct_sig(b)
+        if sa is None or sb is None or sa != sb:
             out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
     # indentation moves: the same text removed at one depth and added at another
     rem = {}
@@ -447,48 +472,117 @@ def structure_changed_lines(old_text, new_text, hunks):
         o = ostart
         for tag, line in body:
             if tag == "-":
-                rem.setdefault(line.strip(), []).append((o, len(line) - len(line.lstrip())))
+                rem.setdefault(line.strip(), []).append((o, len(line.expandtabs()) - len(line.expandtabs().lstrip())))
             if tag != "+":
                 o += 1
     for ostart, body in hunks:
         for tag, line in body:
             if tag == "+" and line.strip() in rem:
-                ind = len(line) - len(line.lstrip())
+                ind = len(line.expandtabs()) - len(line.expandtabs().lstrip())
                 for o, oind in rem[line.strip()]:
                     if oind != ind:
                         for q, node in fo.items():
                             if node.lineno <= o <= (node.end_lineno or node.lineno):
                                 out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    # a hunk whose removed and added code sits at different depths (moved and edited)
+    ind_ = lambda l: len(l.expandtabs()) - len(l.expandtabs().lstrip())
+    for ostart, body in hunks:
+        ri = sorted(ind_(l) for t, l in body if t == "-" and l.strip() and not l.strip().startswith("#"))
+        ai = sorted(ind_(l) for t, l in body if t == "+" and l.strip() and not l.strip().startswith("#"))
+        if ri and ai and ri != ai:
+            o = ostart
+            for t, l in body:
+                if t == "-":
+                    for q, node in fo.items():
+                        if node.lineno <= o <= (node.end_lineno or node.lineno):
+                            out.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+                if t != "+":
+                    o += 1
     return out
 
-_SAFE_OPERAND = r"(?:None|True|False|[A-Z][A-Za-z0-9_]*(?:\.[A-Z][A-Za-z0-9_]*)*\.[A-Z][A-Z0-9_]*)"
+_ENUMS = None
+def enum_classes():
+    """Names of Enum classes defined in sqlglot (from the source)."""
+    global _ENUMS
+    if _ENUMS is None:
+        _ENUMS = set()
+        for f in (SRC / "sqlglot").rglob("*.py"):
+            try:
+                for m in re.finditer(r"^\s*class (\w+)\(([^)]*)\)", f.read_text(), re.M):
+                    if re.search(r"\b(Enum|IntEnum|StrEnum|AutoName|Flag|IntFlag)\b", m.group(2)):
+                        _ENUMS.add(m.group(1))
+            except Exception:
+                pass
+    return _ENUMS
 
-def _canon_identity(line):
-    s = re.sub(r"\bis not (" + _SAFE_OPERAND + r")\b", r"!= \1", line)
-    s = re.sub(r"\bis (" + _SAFE_OPERAND + r")\b", r"== \1", s)
-    s = re.sub(r"(" + _SAFE_OPERAND + r") is not\b", r"\1 !=", s)
-    s = re.sub(r"(" + _SAFE_OPERAND + r") is\b", r"\1 ==", s)
-    return s
+def _toks(line):
+    try:
+        return [(t.type, t.string) for t in tokenize.generate_tokens(io.StringIO(line.strip() + "\n").readline)
+                if t.type not in (tokenize.NEWLINE, tokenize.NL, tokenize.ENDMARKER, tokenize.COMMENT, tokenize.INDENT, tokenize.DEDENT)]
+    except Exception:
+        return None
+
+_CMP = {"is", "==", "!=", "<", ">", "<=", ">=", "in"}
+_AFTER = (")", ",", ":", "and", "or", "else", "if", "]", "}")
+
+def _safe_operand(seq):
+    """seq starts at the operand: None, or EnumClass.MEMBER (optionally module.EnumClass.MEMBER)."""
+    if seq[:1] == [(tokenize.NAME, "None")]:
+        return len(seq) == 1 or seq[1][1] in _AFTER
+    names, k = [], 0
+    while k < len(seq) and seq[k][0] == tokenize.NAME:
+        names.append(seq[k][1])
+        if k + 1 < len(seq) and seq[k + 1][1] == "." and k + 2 < len(seq) and seq[k + 2][0] == tokenize.NAME:
+            k += 2
+        else:
+            k += 1
+            break
+    if len(names) >= 2 and names[-2] in enum_classes() and re.fullmatch(r"[A-Z][A-Z0-9_]*", names[-1]):
+        return k >= len(seq) or seq[k][1] in _AFTER
+    return False
+
+def _identity_pair(a, b):
+    ta, tb = _toks(a), _toks(b)
+    if ta is None or tb is None:
+        return False
+    if sum(1 for t in ta if t[1] in _CMP) != 1 or sum(1 for t in tb if t[1] in _CMP) != 1:
+        return False  # exactly one comparison: no chains
+    ia = [k for k, t in enumerate(ta) if t == (tokenize.NAME, "is")]
+    ib = [k for k, t in enumerate(tb) if t == (tokenize.NAME, "is")]
+    if bool(ia) == bool(ib):
+        return False
+    to_identity = not ia  # the change introduces `is` (old line used ==)
+    if not ia:
+        ta, tb, ia = tb, ta, ib
+    i = ia[0]
+    neg = i + 1 < len(ta) and ta[i + 1] == (tokenize.NAME, "not")
+    rest = ta[i + (2 if neg else 1):]
+    if ta[:i] + [(tokenize.OP, "!=" if neg else "==")] + rest != tb:
+        return False
+    if rest[:1] == [(tokenize.NAME, "None")] or (i >= 1 and ta[i - 1] == (tokenize.NAME, "None")):
+        return _safe_operand(rest) or rest[:1] != [(tokenize.NAME, "None")]
+    # enum members: only `is` -> `==` (a plain string or int equal to a str/int enum
+    # member compares == but not `is`, so the other direction can change results)
+    return (not to_identity) and _safe_operand(rest)
 
 def identity_equality_only(hunks):
-    """True when every change only swaps `is`/`is not` for `==`/`!=` against None,
-    True, False or an enum member (UPPER_CASE attribute of a CamelCase name): for the
-    objects sqlglot compares this way the two spellings give the same result."""
-    rem, add = [], []
+    """True when every change only swaps `is`/`is not` for `==`/`!=` against None or a
+    member of one of sqlglot's Enum classes, line for line inside each hunk."""
+    any_ = False
     for _, body in hunks:
-        for tag, line in body:
-            if tag == "-":
-                rem.append(line)
-            elif tag == "+":
-                add.append(line)
-    if not rem or len(rem) != len(add):
-        return False
-    for a, b in zip(rem, add):
-        if a == b or _canon_identity(a) != _canon_identity(b):
+        tags = "".join(t for t, _ in body)
+        rem = [l for t, l in body if t == "-"]
+        add = [l for t, l in body if t == "+"]
+        if len(rem) != len(add):
             return False
-        if not re.search(r"\bis\b", a + b):
-            return False
-    return True
+        if rem and ("-" * len(rem) + "+" * len(add)) not in tags:
+            return False  # removed lines must be directly replaced by the added ones
+        for a, b in zip(rem, add):
+            ind = lambda l: len(l) - len(l.lstrip())
+            if ind(a) != ind(b) or not _identity_pair(a, b):
+                return False
+            any_ = True
+    return any_
 
 def try_lines(text, lns):
     """For changes inside a try statement (handlers, else, finally), every line of the
@@ -601,6 +695,8 @@ def main():
     READS = {p: int(m, 16) for p, m in M["reads"].items()}
     CLASSES = {c: int(m, 16) for c, m in M.get("classes", {}).items()}
     TESTIMP["imp_by_mod"] = M.get("imp_by_mod", {}); TESTIMP["testdeps"] = M.get("testdeps", {})
+    TESTIMP["test_upper_names"] = M.get("test_upper_names", {})
+    NARROW[0] = LINES; NARROW[1] = IMP
     for c, m in CLASSES.items():
         CLASS_BY_MODULE.setdefault(c.split(":")[0] + ":", []).append((c, m))
     counts = [0] * n
@@ -680,6 +776,25 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
             fl = LINES.get(path, {})
             imp = IMP.get(path, set())
             lns = touched(hunks)
+            # a blank or comment-only neighbour stands for the nearest code lines around it
+            _ol = old_text.split("\n")
+            def _code(k):
+                return 1 <= k <= len(_ol) and _ol[k - 1].strip() and not _ol[k - 1].strip().startswith("#")
+            fixed = set()
+            for k in lns:
+                if _code(k) or k < 1 or k > len(_ol):
+                    fixed.add(k); continue
+                a = k
+                while a >= 1 and not _code(a):
+                    a -= 1
+                b = k
+                while b <= len(_ol) and not _code(b):
+                    b += 1
+                if a >= 1:
+                    fixed.add(a)
+                if b <= len(_ol):
+                    fixed.add(b)
+            lns = fixed
             lns |= stmt_starts(old_text, lns)
             lns |= try_lines(old_text, lns)
             # Functions that memoize (a cache filled on first call and reused, e.g. the
@@ -766,7 +881,7 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
             for ln, q in outside_functions(new_text, added_new_lines(f)).items():
                 import_checks[path] = new_text
                 if stem_of(path):
-                    sel |= import_fallback(path, filemask, by_file, ALL)
+                    sel |= import_fallback(path, filemask, by_file, ALL, new_text, ln, CLASSES)
                 else:
                     key = path[:-3].replace("/", ".") + ":" + q if q else None
                     if key and key in CLASSES:
@@ -831,6 +946,82 @@ def enclosing_classes(text, ln):
     walk(tree, "")
     return best
 
+_SRC_LINES = {}
+def _src_lines():
+    if not _SRC_LINES:
+        for f in (SRC / "sqlglot").rglob("*.py"):
+            rel = str(f.relative_to(SRC))
+            try:
+                _SRC_LINES[rel] = f.read_text().split("\n")
+            except Exception:
+                pass
+    return _SRC_LINES
+
+def changed_attr(text, ln):
+    """If ln sits in a class-body statement that sets or mutates a plain attribute
+    (NAME = ..., NAME += ..., NAME.pop(...), NAME[k] = ...), return NAME."""
+    tree = parse_cached(text)
+    if tree is None:
+        return None
+    for cls in ast.walk(tree):
+        if not isinstance(cls, ast.ClassDef):
+            continue
+        for st in cls.body:
+            if not (st.lineno <= ln <= (st.end_lineno or st.lineno)):
+                continue
+            tg = None
+            if isinstance(st, ast.Assign) and len(st.targets) == 1:
+                tg = st.targets[0]
+            elif isinstance(st, (ast.AnnAssign, ast.AugAssign)):
+                tg = st.target
+            elif isinstance(st, ast.Expr) and isinstance(st.value, ast.Call) and isinstance(st.value.func, ast.Attribute):
+                tg = st.value.func.value
+            if isinstance(tg, ast.Subscript):
+                tg = tg.value
+            if isinstance(tg, ast.Name) and re.fullmatch(r"[A-Z][A-Z0-9_]*", tg.id):
+                return tg.id
+            return None
+    return None
+
+def attr_readers_mask(name, LINES, IMP, by_file):
+    """Tests that ran a line reading `name` anywhere in sqlglot (outside class-body
+    definitions of it), or None if some reader runs at import time (then the value
+    feeds other definitions and the broad fallback is needed)."""
+    pat = re.compile(r"\b" + re.escape(name) + r"\b", re.I)
+    m = 0
+    for rel, lines in _src_lines().items():
+        hits = [k + 1 for k, l in enumerate(lines) if pat.search(l)]
+        if not hits:
+            continue
+        imp = IMP.get(rel, set())
+        fl = LINES.get(rel, {})
+        tree = None
+        for h in hits:
+            if h in imp:
+                # executed at import time: is it only a definition of `name` itself?
+                stripped = lines[h - 1].strip()
+                if re.match(r"^" + re.escape(name) + r"\s*(:[^=]*)?=", stripped) and stripped.count(name) == 1:
+                    continue
+                return None
+            v = fl.get(str(h))
+            if v:
+                m |= int(v, 16)
+            # multi-line statement around the reader
+            if tree is None:
+                try:
+                    tree = parse_cached("\n".join(lines))
+                except Exception:
+                    return None
+            for x in stmt_starts("\n".join(lines), {h}):
+                if x in imp:
+                    return None
+                v = fl.get(str(x))
+                if v:
+                    m |= int(v, 16)
+    for tf in TESTIMP.get("test_upper_names", {}).get(name, ()):
+        m |= by_file.get(tf, 0)
+    return m
+
 def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=None):
     stem = stem_of(path)
     if stem is None and text is not None and ln is not None and in_function(text, ln):
@@ -857,7 +1048,16 @@ def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=No
     # Slow tests that only construct every dialect's components (e.g. the generator
     # memory test) are left out of this broad fallback; a change that breaks component
     # construction also breaks the dialect's own tests, which stay selected.
-    return m & ~WIDE[0]
+    m &= ~WIDE[0]
+    # A plain class attribute (WEEK_OFFSET, KEYWORDS, ...) matters only where it is
+    # read: narrow to the family's tests that ran a reading line.
+    if text is not None and ln is not None and NARROW[0] is not None:
+        name = changed_attr(text, ln)
+        if name:
+            r = attr_readers_mask(name, NARROW[0], NARROW[1], by_file)
+            if r is not None:
+                return m & r
+    return m
 
 def cost(workers, ms):
     if not workers:
