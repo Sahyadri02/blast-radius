@@ -201,30 +201,39 @@ def added_new_lines(f):
     return out
 
 def outside_functions(text, lns):
-    """Lines (of text) that sit outside any function body: they run at import time.
+    """Lines (of text) that run at import time, i.e. outside any function body.
     Returns {line: enclosing class qualname or ''}."""
     tree = ast.parse(text)
     res = {}
-    def walk(node, prefix, in_func):
-        for ch in ast.iter_child_nodes(node):
-            s = getattr(ch, "lineno", None); e = getattr(ch, "end_lineno", None)
+    lns = set(lns)
+    def mark(a, b, prefix):
+        for ln in lns:
+            if a <= ln <= b:
+                res.setdefault(ln, prefix[:-1])
+    def walk(body, prefix):
+        for ch in body:
+            s = ch.lineno; e = ch.end_lineno or s
             if isinstance(ch, ast.ClassDef):
-                walk(ch, prefix + ch.name + ".", in_func)
-            elif isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-                if not in_func:
-                    # decorators, defaults and the def line itself run at import
-                    body_start = ch.body[0].lineno if getattr(ch, "body", None) and isinstance(ch.body, list) else (e or s) + 1
-                    for ln in lns:
-                        if s is not None and min([s] + [d.lineno for d in getattr(ch, "decorator_list", [])]) <= ln < body_start:
-                            res[ln] = prefix[:-1]
-                    walk(ch, prefix, True)
+                top = min([s] + [d.lineno for d in ch.decorator_list])
+                mark(top, max(s, ch.body[0].lineno - 1), prefix + ch.name + ".")
+                walk(ch.body, prefix + ch.name + ".")
+            elif isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                top = min([s] + [d.lineno for d in ch.decorator_list])
+                b0 = ch.body[0].lineno
+                mark(top, b0 - 1 if b0 > s else s, prefix)  # decorators, signature, defaults
+            elif isinstance(ch, ast.If) and "TYPE_CHECKING" in ast.dump(ch.test) and not ch.orelse:
+                continue  # never runs
+            elif isinstance(ch, (ast.If, ast.For, ast.While, ast.With, ast.Try)):
+                first = min([x.lineno for x in getattr(ch, "body", [])] or [s])
+                mark(s, max(s, first - 1), prefix)  # the header itself
+                for fld in ("body", "orelse", "finalbody"):
+                    walk(getattr(ch, fld, []) or [], prefix)
+                for h in getattr(ch, "handlers", []) or []:
+                    mark(h.lineno, h.lineno, prefix)
+                    walk(h.body, prefix)
             else:
-                if not in_func and isinstance(ch, ast.stmt) and s is not None:
-                    for ln in lns:
-                        if s <= ln <= e:
-                            res.setdefault(ln, prefix[:-1])
-                walk(ch, prefix, in_func)
-    walk(tree, "", False)
+                mark(s, e, prefix)
+    walk(tree.body, "")
     return res
 
 def chain_heads(text, lns):
@@ -236,7 +245,7 @@ def chain_heads(text, lns):
         return set()
     out = set()
     def hdr(n):
-        return set(range(n.lineno, n.body[0].lineno)) if n.body else {n.lineno}
+        return set(range(n.lineno, n.body[0].lineno)) or {n.lineno}
     def walk(node, parents):
         for ch in ast.iter_child_nodes(node):
             if isinstance(ch, ast.If):
@@ -270,25 +279,34 @@ def top_names(text):
     if tree is None:
         return None
     names = set()
+    def stmts(body):
+        for n in body:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(n.name)
+            elif isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                    for x in ast.walk(t):
+                        if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store):
+                            names.add(x.id)
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                for a in n.names:
+                    names.add((a.asname or a.name).split(".")[0])
+            elif isinstance(n, ast.If):
+                if "TYPE_CHECKING" in ast.dump(n.test):
+                    continue  # never runs
+                stmts(n.body); stmts(n.orelse)
+            elif isinstance(n, ast.Try):
+                stmts(n.body); stmts(n.orelse); stmts(n.finalbody)
+                for h in n.handlers:
+                    stmts(h.body)
+            elif isinstance(n, (ast.With, ast.For, ast.While)):
+                stmts(n.body)
+    stmts(tree.body)
     for n in tree.body:
-        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(n.name)
-        elif isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-            for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
-                for x in ast.walk(t):
-                    if isinstance(x, ast.Name):
-                        names.add(x.id)
-        elif isinstance(n, (ast.Import, ast.ImportFrom)):
-            for a in n.names:
-                names.add((a.asname or a.name).split(".")[0])
-        else:
-            for x in ast.walk(n):
-                if isinstance(x, (ast.FunctionDef, ast.ClassDef)):
-                    names.add(x.name)
-                elif isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store):
-                    names.add(x.id)
-                elif isinstance(x, ast.alias):
-                    names.add((x.asname or x.name).split(".")[0])
+        if isinstance(n, ast.Delete):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    names.discard(t.id)
     return names
 
 def test_files_closure(files):
@@ -374,6 +392,8 @@ def _forked_check(changed, types):
         try:
             import io as _io
             sys.stderr = _io.StringIO()
+            import signal
+            signal.alarm(20)  # an import-time infinite loop must not hang the run
             items = list(changed.items())
             # modules of descendant dialects build on the changed ones (e.g. pop keys
             # from a parent's dict): run them again on top of the patched modules
@@ -382,11 +402,12 @@ def _forked_check(changed, types):
                 s = stem_of(path)
                 if s:
                     for dsc in sorted(descendants(s) - {s}):
-                        for d in GROUP_DIRS:
+                        for d in ("tokenizers", "typing", "parsers", "generators", "dialects"):
                             q = f"sqlglot/{d}/{dsc}.py"
                             if q not in changed and (SRC / q).exists():
                                 extra.append((q, (SRC / q).read_text()))
-            for path, text in items * 2 + extra:  # 2nd pass sees all new modules
+            seq = [(p_, t_, False) for p_, t_ in items + extra] + [(p_, t_, True) for p_, t_ in items + extra]
+            for path, text, strict in seq:  # 1st pass may hit stale order; 2nd pass must succeed
                 name = path[:-3].replace("/", ".")
                 is_pkg = name.endswith(".__init__")
                 name = name.removesuffix(".__init__")
@@ -396,7 +417,14 @@ def _forked_check(changed, types):
                 if is_pkg:
                     mod.__path__ = [str((SRC / path).parent)]
                 sys.modules[name] = mod
-                exec(compile(text.encode("utf-8"), str(SRC / path), "exec"), mod.__dict__)
+                parent, _, leaf = name.rpartition(".")
+                if parent in sys.modules:
+                    setattr(sys.modules[parent], leaf, mod)
+                try:
+                    exec(compile(text.encode("utf-8"), str(SRC / path), "exec"), mod.__dict__)
+                except BaseException:
+                    if strict:
+                        raise
             code = 0
         except BaseException:
             code = 1
@@ -505,12 +533,19 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
             lns = touched(hunks)
             lns |= stmt_starts(old_text, lns)
             lns |= try_lines(old_text, lns)
-            kw = lambda ls: sorted(l.strip().split(" ", 1)[0].rstrip(":") for l in ls
-                                   if l.strip().startswith(("if ", "elif ", "else")))
+            kw = lambda ls: sorted(m.group(1) for l in ls
+                                   for m in [re.match(r"\s*(if|elif|else)\b", l)] if m)
             if kw(old_lines) != kw(new_lines):
                 # the if/elif/else structure changed (e.g. elif -> if): every test that
                 # evaluated the first condition of the chain is affected
                 lns |= chain_heads(old_text, set(lns))
+                tree0 = parse_cached(old_text)
+                if tree0 is not None:
+                    for nd in ast.walk(tree0):
+                        if isinstance(nd, ast.If):
+                            e_ = nd.end_lineno or nd.lineno
+                            if any(nd.lineno <= x <= e_ + 1 for x in touched(hunks)):
+                                lns |= set(range(nd.lineno, (nd.body[0].lineno if nd.body else nd.lineno) + 1))
             # a module losing a top-level name breaks whoever imports it
             on, nn = top_names(old_text), top_names(new_text)
             if on is None or nn is None:
@@ -526,8 +561,27 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                 for tf in test_files_closure(files):
                     sel |= by_file.get(tf, 0)
                 import_checks[path] = new_text
-            if any("_sql_names" in l for l in new_lines + old_lines):
-                om = registry_owner_mask(new_lines + old_lines, CLASSES)
+            sqln_lines = list(new_lines + old_lines)
+            for txt, lnset in ((old_text, set(touched(hunks))), (new_text, set(added_new_lines(f)))):
+                tr = parse_cached(txt) if txt is old_text else None
+                if tr is None:
+                    try:
+                        tr = ast.parse(txt)
+                    except SyntaxError:
+                        tr = None
+                if tr is None:
+                    continue
+                tl = txt.split("\n")
+                for nd in ast.walk(tr):
+                    if isinstance(nd, (ast.Assign, ast.AnnAssign)):
+                        tg = nd.targets if isinstance(nd, ast.Assign) else [nd.target]
+                        if any(isinstance(t, ast.Name) and t.id == "_sql_names" for t in tg):
+                            e_ = nd.end_lineno or nd.lineno
+                            if any(nd.lineno <= x <= e_ for x in lnset):
+                                sqln_lines += ["_sql_names"] + tl[nd.lineno - 1:e_]
+            new_lines_s, old_lines_s = sqln_lines, []
+            if any("_sql_names" in l for l in sqln_lines):
+                om = registry_owner_mask([l for l in sqln_lines if "_sql_names" in l or l.strip().startswith(("\"", "'"))], CLASSES)
                 if om is None:
                     return ALL
                 sel |= om
@@ -564,11 +618,19 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                 v = fl.get(str(ln))
                 if v:
                     sel |= int(v, 16)
-        elif path in READS:
-            pass  # readers already added above
         elif path.startswith("tests/") and path.endswith(".py") and (path in by_file or path in TESTIMP.get("testdeps", {})):
+            src = SRC / path
+            try:
+                if src.exists():
+                    ot = src.read_text(); nt = apply(ot, hunks)
+                    if code_tokens(ot) == code_tokens(nt):
+                        continue  # comment-only edit to a test file
+            except Exception:
+                pass
             for tf in test_files_closure([path]):
                 sel |= by_file.get(tf, 0)
+        elif path in READS:
+            pass  # readers already added above
         elif path in by_file:
             sel |= by_file[path]
         else:
