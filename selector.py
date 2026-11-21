@@ -61,6 +61,7 @@ def parse_patch(text):
             while i < len(lines) and lines[i].startswith("\\"):
                 i += 1
             cur["hunks"].append((ostart, body))
+            cur.setdefault("nstarts", []).append(int(m.group(3)))
             continue
         i += 1
     out = {}
@@ -103,6 +104,8 @@ def touched(hunks):
     return out
 
 CLASS_BY_MODULE = {}
+TESTIMP = {}
+WIDE = [0]
 GROUP_DIRS = ("dialects", "parsers", "generators", "tokenizers", "typing")
 
 _ast_cache = {}
@@ -184,6 +187,147 @@ def descendants(stem):
                 seen.add(c); todo.append(c)
     return seen
 
+def added_new_lines(f):
+    out = []
+    for (ostart, body), nstart in zip(f["hunks"], f.get("nstarts", [])):
+        n = nstart
+        for tag, line in body:
+            if tag == "+":
+                if line.strip() and not line.strip().startswith("#"):
+                    out.append(n)
+                n += 1
+            elif tag == " ":
+                n += 1
+    return out
+
+def outside_functions(text, lns):
+    """Lines (of text) that sit outside any function body: they run at import time.
+    Returns {line: enclosing class qualname or ''}."""
+    tree = ast.parse(text)
+    res = {}
+    def walk(node, prefix, in_func):
+        for ch in ast.iter_child_nodes(node):
+            s = getattr(ch, "lineno", None); e = getattr(ch, "end_lineno", None)
+            if isinstance(ch, ast.ClassDef):
+                walk(ch, prefix + ch.name + ".", in_func)
+            elif isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                if not in_func:
+                    # decorators, defaults and the def line itself run at import
+                    body_start = ch.body[0].lineno if getattr(ch, "body", None) and isinstance(ch.body, list) else (e or s) + 1
+                    for ln in lns:
+                        if s is not None and min([s] + [d.lineno for d in getattr(ch, "decorator_list", [])]) <= ln < body_start:
+                            res[ln] = prefix[:-1]
+                    walk(ch, prefix, True)
+            else:
+                if not in_func and isinstance(ch, ast.stmt) and s is not None:
+                    for ln in lns:
+                        if s <= ln <= e:
+                            res.setdefault(ln, prefix[:-1])
+                walk(ch, prefix, in_func)
+    walk(tree, "", False)
+    return res
+
+def chain_heads(text, lns):
+    """For an if/elif header, the header lines of every earlier link of its chain:
+    turning `elif` into `if` (or editing a condition) matters to every test that
+    evaluated the first condition."""
+    tree = parse_cached(text)
+    if tree is None:
+        return set()
+    out = set()
+    def hdr(n):
+        return set(range(n.lineno, n.body[0].lineno)) if n.body else {n.lineno}
+    def walk(node, parents):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, ast.If):
+                h = hdr(ch)
+                if h & lns:
+                    for par in parents:
+                        out.update(hdr(par))
+                chain = parents + [ch] if ch.orelse and len(ch.orelse) == 1 and isinstance(ch.orelse[0], ast.If) else []
+                for b in ch.body:
+                    walk_one(b, [])
+                for b in ch.orelse:
+                    if isinstance(b, ast.If) and chain:
+                        walk_one(b, chain)
+                    else:
+                        walk_one(b, [])
+            else:
+                walk(ch, [])
+    def walk_one(n, parents):
+        if isinstance(n, ast.If):
+            wrapper = ast.Module(body=[n], type_ignores=[])
+            walk(wrapper, parents)
+        else:
+            walk(n, [])
+            if isinstance(n, ast.stmt) and not isinstance(n, ast.If):
+                pass
+    walk(tree, [])
+    return out
+
+def top_names(text):
+    tree = parse_cached(text) if text is not None else None
+    if tree is None:
+        return None
+    names = set()
+    for n in tree.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(n.name)
+        elif isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+                for x in ast.walk(t):
+                    if isinstance(x, ast.Name):
+                        names.add(x.id)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            for a in n.names:
+                names.add((a.asname or a.name).split(".")[0])
+        else:
+            for x in ast.walk(n):
+                if isinstance(x, (ast.FunctionDef, ast.ClassDef)):
+                    names.add(x.name)
+                elif isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store):
+                    names.add(x.id)
+                elif isinstance(x, ast.alias):
+                    names.add((x.asname or x.name).split(".")[0])
+    return names
+
+def test_files_closure(files):
+    seen = set(files); todo = list(files)
+    while todo:
+        f = todo.pop()
+        for g in TESTIMP.get("testdeps", {}).get(f, ()):
+            if g not in seen:
+                seen.add(g); todo.append(g)
+    return seen
+
+def in_function(text, ln):
+    tree = parse_cached(text)
+    if tree is None:
+        return True
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) and n.body:
+            b = n.body if isinstance(n.body, list) else [n.body]
+            if b[0].lineno <= ln <= (n.end_lineno or ln):
+                return True
+    return False
+
+def registry_owner_mask(lines, CLASSES):
+    """Classes currently registered under the function names an edit mentions."""
+    m = 0
+    try:
+        ensure_sqlglot()
+        from sqlglot import expressions as E
+        reg = getattr(E, "FUNCTION_BY_NAME", {})
+        for l in lines:
+            for name in re.findall(r"[\"']([A-Za-z_][A-Za-z0-9_]*)[\"']", l):
+                c = reg.get(name.upper())
+                if c is not None:
+                    m |= CLASSES.get(c.__module__ + ":" + c.__qualname__, 0)
+    except Exception as e:
+        log("registry check error", repr(e))
+        return None
+    return m
+
 def try_lines(text, lns):
     """For changes inside a try statement (handlers, else, finally), every line of the
     try body: tests that entered the try can be affected."""
@@ -198,38 +342,68 @@ def try_lines(text, lns):
                 out.update(range(s, (node.body[-1].end_lineno or s) + 1))
     return out
 
-_import_root = None
+_imported = False
 def import_ok(changed):
-    """Import every changed module from a patched copy of the source. False on failure."""
-    global _import_root
-    import shutil, subprocess, tempfile
-    try:
-        if _import_root is None:
-            _import_root = tempfile.mkdtemp(prefix="br_")
-            for d, _, files in os.walk(SRC / "sqlglot"):
-                rel = os.path.relpath(d, SRC)
-                os.makedirs(os.path.join(_import_root, rel), exist_ok=True)
-                for fn in files:
-                    if fn.endswith(".py") or fn.endswith(".typed"):
-                        shutil.copyfile(os.path.join(d, fn), os.path.join(_import_root, rel, fn))
-        root = Path(_import_root)
-        for path, text in changed.items():
-            (root / path).write_text(text)
-        mods = [p[:-3].replace("/", ".").removesuffix(".__init__") for p in changed]
-        code = ("import sys; sys.path.insert(0, %r)\nimport importlib, sqlglot\n"
-                "for m in %r: importlib.import_module(m)\n" % (str(root), mods))
-        r = subprocess.run([sys.executable, "-B", "-c", code], capture_output=True,
-                           timeout=25, cwd=str(root))
-        ok = r.returncode == 0
-    except Exception as e:
-        log("import check error", repr(e)); ok = False
-    finally:
+    """Execute every changed module's patched source in a forked child that has the
+    original sqlglot imported (cheap: one import for the whole run). False on failure."""
+    import types
+    ensure_sqlglot()
+    sys.stdout.flush(); sys.stderr.flush()
+    return _forked_check(changed, types)
+
+def ensure_sqlglot():
+    global _imported
+    import importlib
+    if not _imported:
+        sys.path.insert(0, str(SRC))
+        import sqlglot  # noqa: F401
+        import pkgutil
+        for m in pkgutil.walk_packages(sqlglot.__path__, "sqlglot."):
+            if m.name.endswith("__main__"):
+                continue
+            try:
+                importlib.import_module(m.name)
+            except Exception:
+                pass
+        _imported = True
+
+def _forked_check(changed, types):
+    pid = os.fork()
+    if pid == 0:
+        code = 1
         try:
+            import io as _io
+            sys.stderr = _io.StringIO()
+            items = list(changed.items())
+            # modules of descendant dialects build on the changed ones (e.g. pop keys
+            # from a parent's dict): run them again on top of the patched modules
+            extra = []
             for path in changed:
-                shutil.copyfile(SRC / path, Path(_import_root) / path)
-        except Exception:
-            _import_root = None
-    return ok
+                s = stem_of(path)
+                if s:
+                    for dsc in sorted(descendants(s) - {s}):
+                        for d in GROUP_DIRS:
+                            q = f"sqlglot/{d}/{dsc}.py"
+                            if q not in changed and (SRC / q).exists():
+                                extra.append((q, (SRC / q).read_text()))
+            for path, text in items * 2 + extra:  # 2nd pass sees all new modules
+                name = path[:-3].replace("/", ".")
+                is_pkg = name.endswith(".__init__")
+                name = name.removesuffix(".__init__")
+                mod = types.ModuleType(name)
+                mod.__file__ = str(SRC / path)
+                mod.__package__ = name if is_pkg else name.rpartition(".")[0]
+                if is_pkg:
+                    mod.__path__ = [str((SRC / path).parent)]
+                sys.modules[name] = mod
+                exec(compile(text.encode("utf-8"), str(SRC / path), "exec"), mod.__dict__)
+            code = 0
+        except BaseException:
+            code = 1
+        finally:
+            os._exit(code)
+    _, status = os.waitpid(pid, 0)
+    return os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
 
 def code_tokens(text):
     toks = []
@@ -251,8 +425,22 @@ def main():
     LINES = M["lines"]; IMP = {f: set(v) for f, v in M["import"].items()}
     READS = {p: int(m, 16) for p, m in M["reads"].items()}
     CLASSES = {c: int(m, 16) for c, m in M.get("classes", {}).items()}
+    TESTIMP["imp_by_mod"] = M.get("imp_by_mod", {}); TESTIMP["testdeps"] = M.get("testdeps", {})
     for c, m in CLASSES.items():
         CLASS_BY_MODULE.setdefault(c.split(":")[0] + ":", []).append((c, m))
+    counts = [0] * n
+    for c, m in CLASSES.items():
+        mod, _, q = c.partition(":")
+        if mod.startswith("sqlglot.dialects.") and "." not in q:
+            i = 0
+            while m:
+                if m & 1:
+                    counts[i] += 1
+                m >>= 1; i += 1
+    for i in range(n):
+        if counts[i] >= 30 and tests[i]["seconds"] > 3:
+            WIDE[0] |= 1 << i
+    log("wide tests:", [tests[i]["id"] for i in range(n) if WIDE[0] >> i & 1])
     filemask_cache = {}
     def filemask(path):
         if path not in filemask_cache:
@@ -263,6 +451,8 @@ def main():
         return filemask_cache[path]
     ms = [round(t["seconds"] * 1000) for t in tests]
 
+    all_workers = split(list(range(n)), ms)
+    all_cost = cost(all_workers, ms)
     for patch in sorted((DATA / "commits").glob("*.patch")):
         cid = patch.stem
         try:
@@ -271,12 +461,15 @@ def main():
             log(cid, "error", repr(e)); sel = ALL
         nums = [i for i in range(n) if sel >> i & 1]
         workers = split(nums, ms)
+        if cost(workers, ms) >= all_cost:
+            workers = all_workers  # running everything costs no more: take the safe option
         print(json.dumps({"commit": cid, "workers": workers}))
         log(cid, len(nums), "tests", len(workers), "workers")
 
 def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
     sel = 0
     import_checks = {}
+    all_new = {}
     for path, f in parse_patch(text).items():
         # Some tests read source files as data (e.g. test_typing reads sqlglot/typing/*.py),
         # so a file's readers always count, even for comment-only edits.
@@ -312,14 +505,52 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
             lns = touched(hunks)
             lns |= stmt_starts(old_text, lns)
             lns |= try_lines(old_text, lns)
+            kw = lambda ls: sorted(l.strip().split(" ", 1)[0].rstrip(":") for l in ls
+                                   if l.strip().startswith(("if ", "elif ", "else")))
+            if kw(old_lines) != kw(new_lines):
+                # the if/elif/else structure changed (e.g. elif -> if): every test that
+                # evaluated the first condition of the chain is affected
+                lns |= chain_heads(old_text, set(lns))
+            # a module losing a top-level name breaks whoever imports it
+            on, nn = top_names(old_text), top_names(new_text)
+            if on is None or nn is None:
+                return ALL
+            removed = on - nn
+            if removed:
+                if path.startswith("sqlglot/dialects/") or not stem_of(path):
+                    return ALL
+                mod = path[:-3].replace("/", ".")
+                files = set(TESTIMP.get("imp_by_mod", {}).get(mod, ()))
+                for r in removed:
+                    files |= set(TESTIMP.get("imp_by_mod", {}).get(mod + "." + r, ()))
+                for tf in test_files_closure(files):
+                    sel |= by_file.get(tf, 0)
+                import_checks[path] = new_text
             if any("_sql_names" in l for l in new_lines + old_lines):
+                om = registry_owner_mask(new_lines + old_lines, CLASSES)
+                if om is None:
+                    return ALL
+                sel |= om
                 # function-name registry: tests that built anonymous functions may now
                 # resolve to (or stop resolving to) a real class
                 for key, mask in CLASSES.items():
                     if key.endswith((":Anonymous", ":AnonymousAggFunc")):
                         sel |= mask
+            all_new[path] = new_text
             if any(ln in imp for ln in lns):
                 import_checks[path] = new_text
+            # New code added outside any function (a new method, class attribute or
+            # dict entry) runs at import time even if its neighbours are runtime-only.
+            for ln, q in outside_functions(new_text, added_new_lines(f)).items():
+                import_checks[path] = new_text
+                if stem_of(path):
+                    sel |= import_fallback(path, filemask, by_file, ALL)
+                else:
+                    key = path[:-3].replace("/", ".") + ":" + q if q else None
+                    if key and key in CLASSES:
+                        sel |= CLASSES[key] | filemask(path)
+                    else:
+                        return ALL
             done_fb = set()
             for ln in lns:
                 if ln in imp:
@@ -335,11 +566,16 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                     sel |= int(v, 16)
         elif path in READS:
             pass  # readers already added above
+        elif path.startswith("tests/") and path.endswith(".py") and (path in by_file or path in TESTIMP.get("testdeps", {})):
+            for tf in test_files_closure([path]):
+                sel |= by_file.get(tf, 0)
         elif path in by_file:
             sel |= by_file[path]
         else:
             return ALL
-    if import_checks and sel != ALL and not import_ok(import_checks):
+    # Edits can interact: probe with every changed module, and always when several
+    # source files change together.
+    if (import_checks or len(all_new) > 1) and sel != ALL and not import_ok(all_new):
         return ALL
     return sel
 
@@ -367,6 +603,8 @@ def enclosing_classes(text, ln):
 
 def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=None):
     stem = stem_of(path)
+    if stem is None and text is not None and ln is not None and in_function(text, ln):
+        return ALL  # core code that also runs while modules load (e.g. parsing type strings)
     if stem is None:
         if text is not None and CLASSES:
             q = enclosing_classes(text, ln)
@@ -386,7 +624,15 @@ def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=No
             pre = f"sqlglot.{d}.{s}:"
             for key, mask in CLASS_BY_MODULE.get(pre, ()):
                 m |= mask
-    return m
+    # Slow tests that only construct every dialect's components (e.g. the generator
+    # memory test) are left out of this broad fallback; a change that breaks component
+    # construction also breaks the dialect's own tests, which stay selected.
+    return m & ~WIDE[0]
+
+def cost(workers, ms):
+    if not workers:
+        return 0
+    return max(sum(ms[i] for i in w) for w in workers) + WORKER_MS * len(workers)
 
 def split(nums, ms):
     if not nums:
