@@ -113,7 +113,8 @@ _ast_cache = {}
 def parse_cached(text):
     key = hash(text)
     if key not in _ast_cache:
-        _ast_cache.clear()
+        if len(_ast_cache) > 64:
+            _ast_cache.clear()
         try:
             tree = ast.parse(text)
         except SyntaxError:
@@ -565,6 +566,63 @@ def _identity_pair(a, b):
     # member compares == but not `is`, so the other direction can change results)
     return (not to_identity) and _safe_operand(rest)
 
+def _norm_identity(tree, enum_is_to_eq):
+    E = enum_classes()
+    def is_enum_member(n):
+        return (isinstance(n, ast.Attribute) and re.fullmatch(r"[A-Z][A-Z0-9_]*", n.attr)
+                and ((isinstance(n.value, ast.Name) and n.value.id in E)
+                     or (isinstance(n.value, ast.Attribute) and n.value.attr in E)))
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Compare) and len(n.ops) == 1:
+            a, b = n.left, n.comparators[0]
+            none = any(isinstance(x, ast.Constant) and x.value is None and type(x.value) is type(None) for x in (a, b))
+            if none:
+                if isinstance(n.ops[0], ast.Is):
+                    n.ops[0] = ast.Eq()
+                elif isinstance(n.ops[0], ast.IsNot):
+                    n.ops[0] = ast.NotEq()
+            elif enum_is_to_eq and (is_enum_member(a) or is_enum_member(b)):
+                if isinstance(n.ops[0], ast.Is):
+                    n.ops[0] = ast.Eq()
+                elif isinstance(n.ops[0], ast.IsNot):
+                    n.ops[0] = ast.NotEq()
+    return ast.dump(tree)
+
+def identity_ast_equal(old_text, new_text):
+    """Whole-file check: the trees differ, become equal once `is`/`is not` against None
+    or an enum member are read as `==`/`!=`, and every changed comparison is either
+    against None (any direction) or an enum member going from `is` to `==`. Strings,
+    chains and multi-line statements are handled by the parser."""
+    try:
+        to, tn = ast.parse(old_text), ast.parse(new_text)
+        if ast.dump(to) == ast.dump(tn):
+            return False
+        if _norm_identity(ast.parse(old_text), True) != _norm_identity(ast.parse(new_text), True):
+            return False
+        E = enum_classes()
+        changed = 0
+        for a, b in zip(ast.walk(to), ast.walk(tn)):
+            if isinstance(a, ast.cmpop) and isinstance(b, ast.cmpop):
+                continue  # compared through their Compare node below
+            if type(a) is not type(b):
+                return False
+            if isinstance(a, ast.Compare) and [type(o) for o in a.ops] != [type(o) for o in b.ops]:
+                if len(a.ops) != 1:
+                    return False
+                oa, ob = type(a.ops[0]), type(b.ops[0])
+                x, y = a.left, a.comparators[0]
+                none = any(isinstance(z, ast.Constant) and z.value is None for z in (x, y))
+                if none:
+                    pass
+                elif (oa, ob) in ((ast.Is, ast.Eq), (ast.IsNot, ast.NotEq)):
+                    pass  # enum member, `is` -> `==` (normalisation already checked the operand)
+                else:
+                    return False
+                changed += 1
+        return changed > 0
+    except Exception:
+        return False
+
 def identity_equality_only(hunks):
     """True when every change only swaps `is`/`is not` for `==`/`!=` against None or a
     member of one of sqlglot's Enum classes, line for line inside each hunk."""
@@ -767,11 +825,13 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
             try:
                 if code_tokens(old_text) == code_tokens(new_text):
                     continue  # comment / blank-line only
+                if ast.dump(ast.parse(old_text, type_comments=True)) == ast.dump(ast.parse(new_text, type_comments=True)):
+                    continue  # same syntax tree (quote style, redundant parentheses, trailing commas)
             except (tokenize.TokenError, IndentationError, SyntaxError):
                 return ALL
             if not old_text.strip():
                 return ALL  # code added to an empty file: no coverage to go on
-            if identity_equality_only(hunks):
+            if identity_equality_only(hunks) and identity_ast_equal(old_text, new_text):
                 continue  # `is None` <-> `== None` and `is Enum.MEMBER` <-> `== Enum.MEMBER`
             fl = LINES.get(path, {})
             imp = IMP.get(path, set())
@@ -891,7 +951,7 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
             done_fb = set()
             for ln in lns:
                 if ln in imp:
-                    fb_key = stem_of(path) or enclosing_classes(old_text, ln)
+                    fb_key = (stem_of(path) or enclosing_classes(old_text, ln), changed_attr(old_text, ln))
                     if fb_key in done_fb:
                         continue
                     done_fb.add(fb_key)
@@ -947,12 +1007,15 @@ def enclosing_classes(text, ln):
     return best
 
 _SRC_LINES = {}
+_SRC_LOWER = {}
 def _src_lines():
     if not _SRC_LINES:
         for f in (SRC / "sqlglot").rglob("*.py"):
             rel = str(f.relative_to(SRC))
             try:
-                _SRC_LINES[rel] = f.read_text().split("\n")
+                txt = f.read_text()
+                _SRC_LINES[rel] = txt.split("\n")
+                _SRC_LOWER[rel] = txt.lower()
             except Exception:
                 pass
     return _SRC_LINES
@@ -969,6 +1032,8 @@ def changed_attr(text, ln):
         for st in cls.body:
             if not (st.lineno <= ln <= (st.end_lineno or st.lineno)):
                 continue
+            if isinstance(st, ast.ClassDef):
+                continue  # the inner class is visited by ast.walk
             tg = None
             if isinstance(st, ast.Assign) and len(st.targets) == 1:
                 tg = st.targets[0]
@@ -983,13 +1048,22 @@ def changed_attr(text, ln):
             return None
     return None
 
+_ATTR_CACHE = {}
 def attr_readers_mask(name, LINES, IMP, by_file):
+    if name not in _ATTR_CACHE:
+        _ATTR_CACHE[name] = _attr_readers_mask(name, LINES, IMP, by_file)
+    return _ATTR_CACHE[name]
+
+def _attr_readers_mask(name, LINES, IMP, by_file):
     """Tests that ran a line reading `name` anywhere in sqlglot (outside class-body
     definitions of it), or None if some reader runs at import time (then the value
     feeds other definitions and the broad fallback is needed)."""
     pat = re.compile(r"\b" + re.escape(name) + r"\b", re.I)
+    low = name.lower()
     m = 0
     for rel, lines in _src_lines().items():
+        if low not in _SRC_LOWER[rel]:
+            continue  # cheap whole-file check first
         hits = [k + 1 for k, l in enumerate(lines) if pat.search(l)]
         if not hits:
             continue
@@ -1000,7 +1074,7 @@ def attr_readers_mask(name, LINES, IMP, by_file):
             if h in imp:
                 # executed at import time: is it only a definition of `name` itself?
                 stripped = lines[h - 1].strip()
-                if re.match(r"^" + re.escape(name) + r"\s*(:[^=]*)?=", stripped) and stripped.count(name) == 1:
+                if re.match(r"^" + re.escape(name) + r"\s*(:[^=]*)?=(?!=)", stripped) and len(pat.findall(stripped)) == 1:
                     continue
                 return None
             v = fl.get(str(h))
