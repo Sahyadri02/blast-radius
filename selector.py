@@ -682,6 +682,8 @@ def ensure_sqlglot():
         _imported = True
 
 def _forked_check(changed, types):
+    import gc
+    gc.freeze()  # keep the parent's pages shared with the child
     pid = os.fork()
     if pid == 0:
         code = 1
@@ -741,6 +743,8 @@ def code_tokens(text):
     return toks
 
 def main():
+    import gc
+    gc.disable()  # short batch run: no cyclic garbage worth collecting
     tests = json.loads((DATA / "tests.json").read_text())["tests"]
     n = len(tests)
     ALL = (1 << n) - 1
