@@ -598,6 +598,17 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
             lns = touched(hunks)
             lns |= stmt_starts(old_text, lns)
             lns |= try_lines(old_text, lns)
+            # Functions that memoize (a cache filled on first call and reused, e.g. the
+            # schema caches shared through setUpClass): the first caller covers the fill
+            # branch, later callers only the lookup, so take every line of the function.
+            tr_ = parse_cached(old_text)
+            if tr_ is not None:
+                src_lines = old_text.split("\n")
+                for fn_ in ast.walk(tr_):
+                    if isinstance(fn_, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        a_, b_ = fn_.lineno, fn_.end_lineno or fn_.lineno
+                        if any(a_ <= x <= b_ for x in lns) and "cache" in "\n".join(src_lines[a_ - 1:b_]).lower():
+                            lns |= set(range(a_, b_ + 1))
             sc = scope_changed_lines(old_text, new_text)
             if sc is None:
                 return ALL
