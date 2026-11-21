@@ -104,6 +104,7 @@ def touched(hunks):
     return out
 
 CLASS_BY_MODULE = {}
+PHASES = {}
 NARROW = [None, None]
 TESTIMP = {}
 WIDE = [0]
@@ -773,6 +774,22 @@ def _forked_check(changed, types):
                         d.tokenize("SELECT 1")
                         d.parser()
                         d.generator()
+                        # the generator memory test: repeated construction must not leak
+                        import gc as _gc, tracemalloc as _tm
+                        for _ in range(100):
+                            d.generator()
+                        _gc.collect()
+                        _tm.start()
+                        try:
+                            before = _tm.get_traced_memory()[0]
+                            for _ in range(1000):
+                                d.generator()
+                            _gc.collect()
+                            after = _tm.get_traced_memory()[0]
+                        finally:
+                            _tm.stop()
+                        if after - before >= 1024:
+                            raise RuntimeError("generator leak")
             code = 0
         except BaseException:
             code = 1
@@ -806,6 +823,7 @@ def main():
     TESTIMP["imp_by_mod"] = M.get("imp_by_mod", {}); TESTIMP["testdeps"] = M.get("testdeps", {})
     TESTIMP["test_upper_names"] = M.get("test_upper_names", {})
     NARROW[0] = LINES; NARROW[1] = IMP
+    PHASES.update(M.get("phases", {}))
     for c, m in CLASSES.items():
         CLASS_BY_MODULE.setdefault(c.split(":")[0] + ":", []).append((c, m))
     counts = [0] * n
@@ -850,6 +868,14 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
     sel = 0
     import_checks = {}
     all_new = {}
+    _FP["cur"] = {}
+    _FP["result"] = None
+    for _p, _f in parse_patch(text).items():
+        if _p.startswith("sqlglot/") and _p.endswith(".py") and _f["old"] == _f["new"] and (SRC / _p).exists():
+            try:
+                _FP["cur"][_p] = apply((SRC / _p).read_text(), _f["hunks"])
+            except Exception:
+                pass
     for path, f in parse_patch(text).items():
         # Some tests read source files as data (e.g. test_typing reads sqlglot/typing/*.py),
         # so a file's readers always count, even for comment-only edits.
@@ -882,7 +908,11 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                 return ALL
             if not old_text.strip():
                 return ALL  # code added to an empty file: no coverage to go on
-            lam = lambda_body_only_lines(old_text, new_text)
+            lam = None
+            if any("lambda" in l for l in new_lines + old_lines):
+                lam = lambda_body_only_lines(old_text, new_text)
+            if lam is not None and any(x in IMP.get(path, set()) for x in lam) and not fingerprint_unchanged():
+                lam = None  # a lambda that runs while modules load changed what they build
             if lam is not None:
                 # only the bodies of existing lambdas changed: nothing changes at import
                 # time; the tests that ran those lambda lines are the ones affected
@@ -1009,8 +1039,9 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                     key = path[:-3].replace("/", ".") + ":" + q if q else None
                     if key and key in CLASSES:
                         sel |= CLASSES[key] | (0 if path.startswith("sqlglot/expressions/") else filemask(path))
-                    else:
+                    elif not fingerprint_unchanged():
                         return ALL
+                    # else: the added code leaves every import-time result unchanged
             done_fb = set()
             for ln in lns:
                 if ln in imp:
@@ -1117,7 +1148,7 @@ _LIT_CACHE = {}
 def literal_users(stem, LINES):
     if stem in _LIT_CACHE or LINES is None:
         return _LIT_CACHE.get(stem, 0)
-    pat = re.compile(r"[\"']" + re.escape(stem) + r"[\"']", re.I)
+    pat = re.compile(r"[\"']" + re.escape(stem) + r"[\"',]", re.I)  # sqlglot never uses Dialects.X
     m = 0
     for rel, lines in _src_lines().items():
         if stem_of(rel) == stem or stem.lower() not in _SRC_LOWER[rel]:
@@ -1195,8 +1226,29 @@ def foreign_write(text, ln):
         tgts = [best.target]
     elif isinstance(best, ast.Expr) and isinstance(best.value, ast.Call) and isinstance(best.value.func, ast.Attribute):
         tgts = [best.value.func.value]
+    elif isinstance(best, ast.Expr) and isinstance(best.value, ast.Call) and isinstance(best.value.func, ast.Name) \
+            and best.value.func.id in ("setattr", "delattr") and best.value.args:
+        return True
     elif isinstance(best, ast.Delete):
         tgts = best.targets
+    flat = []
+    for t in tgts:
+        if isinstance(t, (ast.Tuple, ast.List)):
+            flat.extend(t.elts)
+        else:
+            flat.append(t)
+    tgts = flat
+    imported = set()
+    for n in tree.body:
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            for a in n.names:
+                imported.add((a.asname or a.name).split(".")[0])
+    for t in tgts:
+        b = t
+        while isinstance(b, (ast.Subscript, ast.Attribute)):
+            b = b.value
+        if isinstance(b, ast.Name) and b.id in imported and t is not b:
+            return True  # mutating something imported from another module
     for t in tgts:
         while isinstance(t, ast.Subscript):
             t = t.value
@@ -1208,9 +1260,73 @@ def foreign_write(text, ln):
                 return True
     return False
 
+_FP = {"base": None, "cur": None, "result": None}
+
+def _fp_run(root):
+    import subprocess
+    env = dict(os.environ, PYTHONHASHSEED="0", PYTHONDONTWRITEBYTECODE="1")
+    r = subprocess.run([sys.executable, "-B", str(APP / "fp.py"), str(root)],
+                       capture_output=True, text=True, timeout=60, env=env)
+    if r.returncode != 0:
+        return None
+    return json.loads(r.stdout)
+
+def fingerprint_unchanged():
+    """Does importing sqlglot with this commit's changes build exactly the same
+    state (tables, settings, registries, defaults, expressions) as the original?"""
+    if _FP["result"] is not None:
+        return _FP["result"]
+    ok = False
+    try:
+        if _FP["base"] is None:
+            f = APP / "fp_base.json"
+            _FP["base"] = json.loads(f.read_text()) if f.exists() else _fp_run(SRC)
+        changed = _FP["cur"] or {}
+        if _FP["base"] and changed:
+            import shutil, tempfile
+            root = tempfile.mkdtemp(prefix="fp_")
+            for d, _, files in os.walk(SRC / "sqlglot"):
+                rel = os.path.relpath(d, SRC)
+                os.makedirs(os.path.join(root, rel), exist_ok=True)
+                for fn in files:
+                    if fn.endswith(".py") or fn.endswith(".typed"):
+                        shutil.copyfile(os.path.join(d, fn), os.path.join(root, rel, fn))
+            for path, text in changed.items():
+                Path(root, path).write_text(text)
+            got = _fp_run(root)
+            shutil.rmtree(root, ignore_errors=True)
+            ok = got is not None and got == _FP["base"]
+    except Exception as e:
+        log("fingerprint error", repr(e))
+        ok = False
+    _FP["result"] = ok
+    return ok
+
+def import_only_mask(path, ln, by_file):
+    """For a core line that runs while modules load: if it runs only during the
+    plain import of sqlglot (and maybe while test files load), and the import-time
+    state is unchanged, the affected tests are those that run it later (line
+    coverage, added by the caller) plus tests in files that ran it while loading.
+    Returns that mask, or None when the broad fallback is needed."""
+    ph = PHASES.get(path, {}).get(str(ln))
+    if not ph:
+        return None
+    m = 0
+    for k in ph:
+        if k == "import":
+            continue
+        return None  # warm-up, test-file loading or other setup: keep the broad rule
+    if not fingerprint_unchanged():
+        return None
+    return m
+
 def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=None):
     if text is not None and ln is not None and foreign_write(text, ln):
         return ALL
+    if stem_of(path) is None and ln is not None and text is not None:
+        r = import_only_mask(path, ln, by_file)
+        if r is not None:
+            return r
     stem = stem_of(path)
     if stem is None and text is not None and ln is not None and in_function(text, ln):
         return ALL  # core code that also runs while modules load (e.g. parsing type strings)

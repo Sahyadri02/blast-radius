@@ -5,7 +5,9 @@ FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf107
 COPY sqlglot-src.tar.gz /tmp/
 RUN mkdir -p /opt/sqlglot && tar -xzf /tmp/sqlglot-src.tar.gz -C /opt/sqlglot \
     && rm /tmp/sqlglot-src.tar.gz && chmod -R a+rX /opt/sqlglot
-COPY selector.py map.json.gz /app/
-RUN chmod -R a+rX /app
+COPY selector.py map.json.gz fp.py /app/
+# Fingerprint of the original import-time state, computed once at build time.
+RUN PYTHONHASHSEED=0 python -B /app/fp.py /opt/sqlglot > /app/fp_base.json \
+    && chmod -R a+rX /app
 ENV PYTHONDONTWRITEBYTECODE=1
 CMD ["python", "/app/selector.py"]
