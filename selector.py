@@ -181,6 +181,7 @@ def main():
         M = json.load(fh)
     LINES = M["lines"]; IMP = {f: set(v) for f, v in M["import"].items()}
     READS = {p: int(m, 16) for p, m in M["reads"].items()}
+    CLASSES = {c: int(m, 16) for c, m in M.get("classes", {}).items()}
     filemask_cache = {}
     def filemask(path):
         if path not in filemask_cache:
@@ -194,7 +195,7 @@ def main():
     for patch in sorted((DATA / "commits").glob("*.patch")):
         cid = patch.stem
         try:
-            sel = select(patch.read_text(errors="replace"), LINES, IMP, READS, by_file, filemask, ALL)
+            sel = select(patch.read_text(errors="replace"), LINES, IMP, READS, by_file, filemask, ALL, CLASSES)
         except Exception as e:
             log(cid, "error", repr(e)); sel = ALL
         nums = [i for i in range(n) if sel >> i & 1]
@@ -202,7 +203,7 @@ def main():
         print(json.dumps({"commit": cid, "workers": workers}))
         log(cid, len(nums), "tests", len(workers), "workers")
 
-def select(text, LINES, IMP, READS, by_file, filemask, ALL):
+def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
     sel = 0
     for path, f in parse_patch(text).items():
         if f["binary"] or f["old"] is None or f["new"] is None or f["old"] != f["new"]:
@@ -229,7 +230,7 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL):
             lns |= stmt_starts(old_text, lns)
             for ln in lns:
                 if ln in imp:
-                    sel |= import_fallback(path, filemask, by_file, ALL)
+                    sel |= import_fallback(path, filemask, by_file, ALL, old_text, ln, CLASSES)
                 v = fl.get(str(ln))
                 if v:
                     sel |= int(v, 16)
@@ -241,9 +242,38 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL):
             return ALL
     return sel
 
-def import_fallback(path, filemask, by_file, ALL):
+def enclosing_classes(text, ln):
+    """Qualified name of the innermost class whose body (outside any function) holds ln."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    best = None
+    def walk(node, prefix):
+        nonlocal best
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, ast.ClassDef):
+                s = min([ch.lineno] + [d.lineno for d in ch.decorator_list])
+                if s <= ln <= (ch.end_lineno or ch.lineno):
+                    q = prefix + ch.name
+                    best = q
+                    walk(ch, q + ".")
+            elif isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            else:
+                walk(ch, prefix)
+    walk(tree, "")
+    return best
+
+def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=None):
     stem = stem_of(path)
     if stem is None:
+        if text is not None and CLASSES:
+            q = enclosing_classes(text, ln)
+            if q:
+                key = path[:-3].replace("/", ".") + ":" + q
+                if key in CLASSES:
+                    return CLASSES[key] | filemask(path)
         return ALL
     m = 0
     for s in descendants(stem):
