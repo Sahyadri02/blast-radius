@@ -1,0 +1,13 @@
+diff --git a/sqlglot/expressions/dml.py b/sqlglot/expressions/dml.py
+index 49d386a34..0d86a359f 100644
+--- a/sqlglot/expressions/dml.py
++++ b/sqlglot/expressions/dml.py
+@@ -509,7 +509,7 @@ class Update(Expression, DML):
+ class Merge(Expression, DML):
+     arg_types = {
+         "this": True,
+-        "using": True,
++        "using": False,
+         "on": False,
+         "using_cond": False,
+         "whens": True,

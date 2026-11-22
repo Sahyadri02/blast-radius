@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generators/snowflake.py b/sqlglot/generators/snowflake.py
+index c224f5ffb..b6d237b50 100644
+--- a/sqlglot/generators/snowflake.py
++++ b/sqlglot/generators/snowflake.py
+@@ -376,7 +376,7 @@ class SnowflakeGenerator(generator.Generator):
+     MATCHED_BY_SOURCE = False
+     SUPPORTS_MULTI_ARG_CHR = False
+     MERGE_ALL_BY_NAME = True
+-    SINGLE_STRING_INTERVAL = True
++    SINGLE_STRING_INTERVAL = False
+     CAST_TO_INT_ROUNDS = True
+     JOIN_HINTS = False
+     TABLE_HINTS = False

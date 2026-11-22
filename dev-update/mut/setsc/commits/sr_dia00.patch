@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parsers/databricks.py b/sqlglot/parsers/databricks.py
+index ff179dabe..c5583dd3f 100644
+--- a/sqlglot/parsers/databricks.py
++++ b/sqlglot/parsers/databricks.py
+@@ -11,7 +11,6 @@ class DatabricksParser(SparkParser):
+     LOG_DEFAULTS_TO_LN = True
+     STRICT_CAST = True
+     COLON_IS_VARIANT_EXTRACT = True
+-    COLON_CHAIN_IS_SINGLE_EXTRACT = False
+ 
+     STATEMENT_PARSERS = {
+         **SparkParser.STATEMENT_PARSERS,

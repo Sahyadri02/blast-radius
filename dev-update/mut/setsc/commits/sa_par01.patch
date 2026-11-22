@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..427ebab4c 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -684,6 +684,7 @@ class Parser:
+         TokenType.SELECT,
+         TokenType.WITH,
+         TokenType.FROM,
++        TokenType.DIV,
+     }
+ 
+     RESERVED_TOKENS: t.ClassVar = {

@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..759b742f1 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -1915,7 +1915,7 @@ class Parser:
+     DEFAULT_SAMPLING_METHOD: t.ClassVar[str | None] = None
+ 
+     # Whether the SET command needs a delimiter (e.g. "=") for assignments
+-    SET_REQUIRES_ASSIGNMENT_DELIMITER: t.ClassVar = True
++    SET_REQUIRES_ASSIGNMENT_DELIMITER: t.ClassVar = False
+ 
+     # Whether the TRIM function expects the characters to trim as its first argument
+     TRIM_PATTERN_FIRST: t.ClassVar = False

@@ -1,0 +1,2 @@
+tests/dialects/test_bigquery.py::TestBigQuery::test_warnings
+tests/test_transpile.py::TestTranspile::test_command_identity

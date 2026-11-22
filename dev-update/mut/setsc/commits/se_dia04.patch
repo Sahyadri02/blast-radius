@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/singlestore.py b/sqlglot/generators/singlestore.py
+index 1220c30d1..3281c2df5 100644
+--- a/sqlglot/generators/singlestore.py
++++ b/sqlglot/generators/singlestore.py
+@@ -1322,7 +1322,6 @@ class SingleStoreGenerator(MySQLGenerator):
+         "to_seconds",
+         "to_timestamp",
+         "tracelogs",
+-        "traditional",
+         "trailing",
+         "transform",
+         "transaction",

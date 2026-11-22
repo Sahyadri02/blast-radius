@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..f47fc4587 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -533,6 +533,7 @@ class Parser:
+         TokenType.DYNAMIC,
+         TokenType.ENUM,
+         TokenType.ENUM8,
++        TokenType.MEDIUMTEXT,
+         TokenType.ENUM16,
+     }
+ 

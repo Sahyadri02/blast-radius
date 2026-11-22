@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parsers/tsql.py b/sqlglot/parsers/tsql.py
+index 0900aca9f..61e24c841 100644
+--- a/sqlglot/parsers/tsql.py
++++ b/sqlglot/parsers/tsql.py
+@@ -357,7 +357,7 @@ class TSQLParser(parser.Parser):
+     }
+ 
+     # T-SQL does not allow BEGIN to be used as an identifier
+-    ID_VAR_TOKENS = (parser.Parser.ID_VAR_TOKENS | {TokenType.RETURNING}) - {TokenType.BEGIN}
++    ID_VAR_TOKENS = (parser.Parser.ID_VAR_TOKENS | {TokenType.RETURNING}) - {TokenType.ANTI, TokenType.BEGIN}
+     ALIAS_TOKENS = (parser.Parser.ALIAS_TOKENS | {TokenType.RETURNING}) - {TokenType.BEGIN}
+     TABLE_ALIAS_TOKENS = (parser.Parser.TABLE_ALIAS_TOKENS | {TokenType.ANTI, TokenType.SEMI}) - {
+         TokenType.BEGIN

@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 573d3c15d..49924de52 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -893,7 +893,6 @@ class Generator:
+     )
+ 
+     PARAMETERIZABLE_TEXT_TYPES: t.ClassVar = {
+-        exp.DType.NVARCHAR,
+         exp.DType.VARCHAR,
+         exp.DType.CHAR,
+         exp.DType.NCHAR,

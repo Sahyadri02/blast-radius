@@ -1,0 +1,2 @@
+tests/dialects/test_dialect.py::TestDialect::test_alias
+tests/dialects/test_teradata.py::TestTeradata::test_hex_character_string

@@ -1,0 +1,12 @@
+diff --git a/sqlglot/generators/postgres.py b/sqlglot/generators/postgres.py
+index 1db4172cd..5e752c3b5 100644
+--- a/sqlglot/generators/postgres.py
++++ b/sqlglot/generators/postgres.py
+@@ -287,7 +287,6 @@ class PostgresGenerator(generator.Generator):
+     JOIN_HINTS = False
+     TABLE_HINTS = False
+     QUERY_HINTS = False
+-    NVL2_SUPPORTED = False
+     PARAMETER_TOKEN = "$"
+     NAMED_PLACEHOLDER_TOKEN = "%"
+     TABLESAMPLE_SIZE_IS_ROWS = False

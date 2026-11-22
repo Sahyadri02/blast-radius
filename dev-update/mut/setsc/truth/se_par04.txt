@@ -1,0 +1,4 @@
+tests/dialects/test_bigquery.py::TestBigQuery::test_with_offset
+tests/test_build.py::TestBuild::test_build
+tests/test_optimizer.py::TestOptimizer::test_merge_subqueries
+tests/test_transpile.py::TestTranspile::test_identity

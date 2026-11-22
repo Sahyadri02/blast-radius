@@ -1,0 +1,2 @@
+tests/dialects/test_clickhouse.py::TestClickhouse::test_clickhouse
+tests/test_transpile.py::TestTranspile::test_identity

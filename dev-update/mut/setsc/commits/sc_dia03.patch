@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generators/drill.py b/sqlglot/generators/drill.py
+index e39f40854..32f4013bf 100644
+--- a/sqlglot/generators/drill.py
++++ b/sqlglot/generators/drill.py
+@@ -35,7 +35,7 @@ class DrillGenerator(generator.Generator):
+ 
+     AFTER_HAVING_MODIFIER_TRANSFORMS = generator.AFTER_HAVING_MODIFIER_TRANSFORMS
+ 
+-    JOIN_HINTS = False
++    JOIN_HINTS = True
+     TABLE_HINTS = False
+     QUERY_HINTS = False
+     NVL2_SUPPORTED = False

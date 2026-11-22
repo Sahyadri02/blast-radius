@@ -1,0 +1,3 @@
+tests/dialects/test_hive.py::TestHive::test_hive
+tests/dialects/test_postgres.py::TestPostgres::test_ddl
+tests/test_transpile.py::TestTranspile::test_command_identity

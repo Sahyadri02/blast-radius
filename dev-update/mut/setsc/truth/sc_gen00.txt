@@ -1,0 +1,8 @@
+tests/dialects/test_bigquery.py::TestBigQuery::test_ml_functions
+tests/dialects/test_bigquery.py::TestBigQuery::test_unnest_with_offset
+tests/dialects/test_databricks.py::TestDatabricks::test_unnest_with_ordinality
+tests/dialects/test_dialect.py::TestDialect::test_cross_join
+tests/dialects/test_postgres.py::TestPostgres::test_star_except
+tests/test_optimizer.py::TestOptimizer::test_qualify_columns
+tests/test_transpile.py::TestTranspile::test_identity
+tests/test_transpile.py::TestTranspile::test_pretty

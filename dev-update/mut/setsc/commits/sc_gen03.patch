@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 573d3c15d..d157c3e20 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -670,7 +670,7 @@ class Generator:
+     UPDATE_STATEMENT_SUPPORTS_FROM = True
+ 
+     # Whether SELECT *, ... EXCLUDE requires wrapping in a subquery for transpilation.
+-    STAR_EXCLUDE_REQUIRES_DERIVED_TABLE = True
++    STAR_EXCLUDE_REQUIRES_DERIVED_TABLE = False
+ 
+     # Whether DROP and ALTER statements against Iceberg tables include 'ICEBERG', e.g.:
+     # - Snowflake: DROP ICEBERG TABLE a.b;

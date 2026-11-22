@@ -1,0 +1,8 @@
+tests/dialects/test_bigquery.py::TestBigQuery::test_bigquery
+tests/test_parser.py::TestParser::test_comments_delete
+tests/test_parser.py::TestParser::test_comments_delete_cte
+tests/test_parser.py::TestParser::test_comments_insert
+tests/test_parser.py::TestParser::test_comments_select
+tests/test_parser.py::TestParser::test_comments_update
+tests/test_tokens.py::TestTokens::test_comment_attachment
+tests/test_transpile.py::TestTranspile::test_comments

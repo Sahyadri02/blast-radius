@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..ec5b377f3 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -1951,7 +1951,7 @@ class Parser:
+     SUPPORTS_TABLE_QUERY: t.ClassVar = False
+ 
+     # Whether field names can be digit-prefixed, e.g. data.144A_FLAG or data.144 (BigQuery)
+-    SUPPORTS_DIGIT_PREFIXED_FIELD_NAMES: t.ClassVar = False
++    SUPPORTS_DIGIT_PREFIXED_FIELD_NAMES: t.ClassVar = True
+ 
+     # Whether or not interval spans are supported, INTERVAL 1 YEAR TO MONTHS
+     INTERVAL_SPANS: t.ClassVar = True

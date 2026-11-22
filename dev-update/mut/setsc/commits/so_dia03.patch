@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generators/snowflake.py b/sqlglot/generators/snowflake.py
+index c224f5ffb..e4e2b60d5 100644
+--- a/sqlglot/generators/snowflake.py
++++ b/sqlglot/generators/snowflake.py
+@@ -371,6 +371,8 @@ def _eliminate_dot_variant_lookup(expression: exp.Expr) -> exp.Expr:
+ 
+ class SnowflakeGenerator(generator.Generator):
+     BYTE_STRING_FUNCTION = "HEX_DECODE_BINARY"
++
++    SUPPORTS_NEAREST_JOIN = True
+     SELECT_KINDS = ()
+     PARAMETER_TOKEN = "$"
+     MATCHED_BY_SOURCE = False

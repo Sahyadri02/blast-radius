@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..941b962fc 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -521,6 +521,7 @@ class Parser:
+ 
+     NESTED_TYPE_TOKENS: t.ClassVar = {
+         TokenType.ARRAY,
++        TokenType.POLYGON,
+         TokenType.LIST,
+         TokenType.LOWCARDINALITY,
+         TokenType.MAP,

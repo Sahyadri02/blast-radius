@@ -1,0 +1,12 @@
+diff --git a/sqlglot/expressions/datatypes.py b/sqlglot/expressions/datatypes.py
+index 269743844..733580e8b 100644
+--- a/sqlglot/expressions/datatypes.py
++++ b/sqlglot/expressions/datatypes.py
+@@ -271,6 +271,7 @@ class DataType(Expression):
+         DType.UINT256,
+         DType.UMEDIUMINT,
+         DType.USMALLINT,
++        DType.FLOAT,
+         DType.UTINYINT,
+         DType.BIT,
+     }

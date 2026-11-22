@@ -1,0 +1,2 @@
+tests/dialects/test_dialect.py::TestDialect::test_limit
+tests/dialects/test_tsql.py::TestTSQL::test_convert

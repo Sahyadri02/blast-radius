@@ -1,0 +1,13 @@
+diff --git a/sqlglot/dialects/hive.py b/sqlglot/dialects/hive.py
+index ad0e128cb..6a6a65e6a 100644
+--- a/sqlglot/dialects/hive.py
++++ b/sqlglot/dialects/hive.py
+@@ -18,6 +18,8 @@ from sqlglot.typing.hive import EXPRESSION_METADATA
+ 
+ class Hive(Dialect):
+     ALIAS_POST_TABLESAMPLE = True
++
++    NULL_ORDERING = 'nulls_are_smal'
+     IDENTIFIERS_CAN_START_WITH_DIGIT = True
+     SUPPORTS_USER_DEFINED_TYPES = False
+     SAFE_DIVISION = True

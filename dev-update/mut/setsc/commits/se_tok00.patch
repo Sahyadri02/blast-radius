@@ -1,0 +1,12 @@
+diff --git a/sqlglot/tokens.py b/sqlglot/tokens.py
+index 7806999a1..dfb4bd699 100644
+--- a/sqlglot/tokens.py
++++ b/sqlglot/tokens.py
+@@ -546,7 +546,6 @@ class Tokenizer(_TokenizerBase):
+ 
+     COMMANDS = {
+         TokenType.COMMAND,
+-        TokenType.EXECUTE,
+         TokenType.FETCH,
+         TokenType.SHOW,
+         TokenType.RENAME,

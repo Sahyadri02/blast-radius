@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..4bb8694d3 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -1921,7 +1921,7 @@ class Parser:
+     TRIM_PATTERN_FIRST: t.ClassVar = False
+ 
+     # Whether string aliases are supported `SELECT COUNT(*) 'count'`
+-    STRING_ALIASES: t.ClassVar = False
++    STRING_ALIASES: t.ClassVar = True
+ 
+     # Whether query modifiers such as LIMIT are attached to the UNION node (vs its right operand)
+     MODIFIERS_ATTACHED_TO_SET_OP: t.ClassVar = True

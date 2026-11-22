@@ -1,0 +1,2 @@
+tests/test_serde.py::TestSerde::test_serde
+tests/test_transpile.py::TestTranspile::test_identity

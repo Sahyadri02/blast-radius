@@ -1,0 +1,13 @@
+diff --git a/sqlglot/tokens.py b/sqlglot/tokens.py
+index 7806999a1..a2fd50822 100644
+--- a/sqlglot/tokens.py
++++ b/sqlglot/tokens.py
+@@ -202,7 +202,7 @@ class Tokenizer(_TokenizerBase):
+     NUMERIC_ESCAPES_ARE_BYTES = False
+ 
+     # What an unpaired surrogate escape (e.g. \uD800) decodes to. If empty, it isn't decoded
+-    LONE_SURROGATE_REPLACEMENT = ""
++    LONE_SURROGATE_REPLACEMENT = 'X'
+ 
+     NESTED_COMMENTS = True
+ 

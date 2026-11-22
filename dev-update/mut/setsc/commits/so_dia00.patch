@@ -1,0 +1,10 @@
+diff --git a/sqlglot/parsers/fabric.py b/sqlglot/parsers/fabric.py
+index 1296578ba..7780ab19f 100644
+--- a/sqlglot/parsers/fabric.py
++++ b/sqlglot/parsers/fabric.py
+@@ -25,3 +25,5 @@ class FabricParser(TSQLParser):
+                             column_type.set("expressions", [exp.Literal.number("1")])
+ 
+         return create
++
++    ALTER_DROP_REQUIRES_COLUMN = False

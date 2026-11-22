@@ -1,0 +1,14 @@
+tests/dialects/test_clickhouse.py::TestClickhouse::test_clickhouse
+tests/dialects/test_databricks.py::TestDatabricks::test_unnest_with_ordinality
+tests/dialects/test_dialect.py::TestDialect::test_limit
+tests/dialects/test_dialect.py::TestDialect::test_order_by
+tests/dialects/test_dialect.py::TestDialect::test_unsupported_null_ordering
+tests/dialects/test_exasol.py::TestExasol::test_aggregateFunctions
+tests/dialects/test_hive.py::TestHive::test_order_by
+tests/dialects/test_postgres.py::TestPostgres::test_postgres
+tests/dialects/test_presto.py::TestPresto::test_ddl
+tests/dialects/test_redshift.py::TestRedshift::test_redshift
+tests/dialects/test_snowflake.py::TestSnowflake::test_snowflake
+tests/dialects/test_spark.py::TestSpark::test_spark
+tests/dialects/test_spark.py::TestSpark::test_strip_modifiers
+tests/dialects/test_sqlite.py::TestSQLite::test_sqlite

@@ -1,0 +1,1 @@
+tests/dialects/test_singlestore.py::TestSingleStore::test_singlestore

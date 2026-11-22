@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..9fcb3011c 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -1058,6 +1058,7 @@ class Parser:
+ 
+     JOIN_KINDS: t.ClassVar = {
+         TokenType.ANTI,
++        TokenType.DEFAULT,
+         TokenType.CROSS,
+         TokenType.INNER,
+         TokenType.OUTER,

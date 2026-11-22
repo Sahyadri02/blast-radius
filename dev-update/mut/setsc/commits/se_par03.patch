@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..81cbe0f94 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -843,7 +843,6 @@ class Parser:
+         TokenType.SEMI,
+         TokenType.SET,
+         TokenType.SETTINGS,
+-        TokenType.SHOW,
+         TokenType.STREAM,
+         TokenType.STREAMLIT,
+         TokenType.TEMPORARY,

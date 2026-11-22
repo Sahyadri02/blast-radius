@@ -1,0 +1,12 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..71bb99b25 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -776,7 +776,6 @@ class Parser:
+         TokenType.CONNECT,
+         TokenType.CONSTRAINT,
+         TokenType.COPY,
+-        TokenType.CUBE,
+         TokenType.CURRENT_SCHEMA,
+         TokenType.DECLARE,
+         TokenType.DEFAULT,

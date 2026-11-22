@@ -1,0 +1,1 @@
+tests/dialects/test_hive.py::TestHive::test_ddl

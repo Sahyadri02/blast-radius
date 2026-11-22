@@ -1,0 +1,12 @@
+tests/test_executor.py::TestExecutor::test_correlated_count
+tests/test_executor.py::TestExecutor::test_correlated_exists_over_a_nested_scalar_aggregate
+tests/test_executor.py::TestExecutor::test_correlated_exists_over_scalar_aggregate
+tests/test_executor.py::TestExecutor::test_correlated_not_in_is_not_unnested
+tests/test_executor.py::TestExecutor::test_correlated_not_in_not_join_key_is_not_unnested
+tests/test_executor.py::TestExecutor::test_execute_callable
+tests/test_executor.py::TestExecutor::test_scalar_functions
+tests/test_executor.py::TestExecutor::test_subqueries
+tests/test_executor.py::TestExecutor::test_subquery_execution_does_not_mutate_the_plan
+tests/test_executor.py::TestExecutor::test_subquery_memoization
+tests/test_optimizer.py::TestOptimizer::test_gen
+tests/test_optimizer.py::TestOptimizer::test_simplify

@@ -1,0 +1,13 @@
+diff --git a/sqlglot/expressions/core.py b/sqlglot/expressions/core.py
+index 2fc96ada0..ad8dbc68d 100644
+--- a/sqlglot/expressions/core.py
++++ b/sqlglot/expressions/core.py
+@@ -1815,7 +1815,7 @@ class Hint(Expression):
+ 
+ 
+ class JoinHint(Expression):
+-    arg_types = {"this": True, "expressions": True}
++    arg_types = {"this": True, "expressions": False}
+ 
+ 
+ class Identifier(Expression):

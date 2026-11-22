@@ -1,0 +1,11 @@
+diff --git a/sqlglot/parsers/tableau.py b/sqlglot/parsers/tableau.py
+index 5e2776e3a..ec7badc3b 100644
+--- a/sqlglot/parsers/tableau.py
++++ b/sqlglot/parsers/tableau.py
+@@ -13,4 +13,6 @@ class TableauParser(parser.Parser):
+             this=seq_get(args, 0), substr=seq_get(args, 1), occurrence=seq_get(args, 2)
+         ),
+     }
++
++    SUPPORTS_IMPLICIT_UNNEST = True
+     NO_PAREN_IF_COMMANDS = False

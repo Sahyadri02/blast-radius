@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 573d3c15d..119a980b8 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -582,7 +582,7 @@ class Generator:
+     UNICODE_SUBSTITUTE: t.ClassVar[t.Any] = None
+ 
+     # The keyword to use when generating a star projection with excluded columns
+-    STAR_EXCEPT = "EXCEPT"
++    STAR_EXCEPT = 'EXCEP'
+ 
+     # The HEX function name
+     HEX_FUNC = "HEX"

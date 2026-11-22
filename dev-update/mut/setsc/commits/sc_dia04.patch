@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generators/teradata.py b/sqlglot/generators/teradata.py
+index 6dbbf6774..7d0f235c0 100644
+--- a/sqlglot/generators/teradata.py
++++ b/sqlglot/generators/teradata.py
+@@ -54,7 +54,7 @@ class TeradataGenerator(generator.Generator):
+     JOIN_HINTS = False
+     TABLE_HINTS = False
+     QUERY_HINTS = False
+-    TABLESAMPLE_KEYWORDS = "SAMPLE"
++    TABLESAMPLE_KEYWORDS = 'SAMPL'
+     LAST_DAY_SUPPORTS_DATE_PART = False
+     CAN_IMPLEMENT_ARRAY_ANY = True
+     TZ_TO_WITH_TIME_ZONE = True

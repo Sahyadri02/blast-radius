@@ -1,0 +1,13 @@
+diff --git a/sqlglot/expressions/__init__.py b/sqlglot/expressions/__init__.py
+index 00feba572..a84fa393f 100644
+--- a/sqlglot/expressions/__init__.py
++++ b/sqlglot/expressions/__init__.py
+@@ -46,7 +46,7 @@ from sqlglot.expressions.array import _ExplodeOuter  # noqa: F401,E402
+ 
+ from sqlglot.helper import subclasses
+ 
+-ALL_FUNCTIONS = subclasses(__name__, Func, {AggFunc, Anonymous, Func})
++ALL_FUNCTIONS = subclasses(__name__, Func, {Anonymous, Func})
+ FUNCTION_BY_NAME = {name: func for func in ALL_FUNCTIONS for name in func.sql_names()}
+ EXPR_CLASSES: dict[str, type[Expr]] = {cls.key: cls for cls in subclasses(__name__, Expr)}
+ 

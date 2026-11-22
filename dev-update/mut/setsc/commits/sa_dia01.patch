@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parsers/mysql.py b/sqlglot/parsers/mysql.py
+index 3ba279adf..5d28eae4a 100644
+--- a/sqlglot/parsers/mysql.py
++++ b/sqlglot/parsers/mysql.py
+@@ -101,7 +101,7 @@ class MySQLParser(parser.Parser):
+     }
+ 
+     TABLE_ALIAS_TOKENS = (
+-        (parser.Parser.TABLE_ALIAS_TOKENS | {TokenType.ANTI, TokenType.SEMI})
++        (parser.Parser.TABLE_ALIAS_TOKENS | {TokenType.ANTI, TokenType.DATABASE, TokenType.SEMI})
+         - parser.Parser.TABLE_INDEX_HINT_TOKENS
+         - {TokenType.STRAIGHT_JOIN}
+     )

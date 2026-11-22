@@ -1,0 +1,2 @@
+tests/dialects/test_databricks.py::TestDatabricks::test_databricks
+tests/dialects/test_hive.py::TestHive::test_hive

@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 573d3c15d..66939ff1b 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -423,7 +423,7 @@ class Generator:
+     # Whether VALUES statements can be used as derived tables.
+     # MySQL 5 and Redshift do not allow this, so when False, it will convert
+     # SELECT * VALUES into SELECT UNION
+-    VALUES_AS_TABLE = True
++    VALUES_AS_TABLE = False
+ 
+     # Whether COLUMN/COLUMNS keywords are included when adding columns with ALTER TABLE.
+     ALTER_TABLE_INCLUDE_COLUMN_KEYWORD = True

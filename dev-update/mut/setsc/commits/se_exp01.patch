@@ -1,0 +1,12 @@
+diff --git a/sqlglot/expressions/datatypes.py b/sqlglot/expressions/datatypes.py
+index 269743844..cb4b9f64c 100644
+--- a/sqlglot/expressions/datatypes.py
++++ b/sqlglot/expressions/datatypes.py
+@@ -213,7 +213,6 @@ class DataType(Expression):
+         DType.UNION,
+         DType.ARRAY,
+         DType.LIST,
+-        DType.MAP,
+     }
+ 
+     TEXT_TYPES: t.ClassVar[set[DType]] = {

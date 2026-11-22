@@ -1,0 +1,13 @@
+diff --git a/sqlglot/expressions/core.py b/sqlglot/expressions/core.py
+index 2fc96ada0..bbdb1cdfe 100644
+--- a/sqlglot/expressions/core.py
++++ b/sqlglot/expressions/core.py
+@@ -2357,7 +2357,7 @@ class TeradataNamed(Alias):
+ 
+ 
+ class Between(Expression, Predicate):
+-    arg_types = {"this": True, "low": True, "high": True, "symmetric": False}
++    arg_types = {"this": True, "low": False, "high": True, "symmetric": False}
+ 
+ 
+ class Distinct(Expression):

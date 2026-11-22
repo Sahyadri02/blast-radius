@@ -1,0 +1,9 @@
+tests/dialects/test_databricks.py::TestDatabricks::test_databricks
+tests/dialects/test_dremio.py::TestDremio::test_date_add
+tests/dialects/test_dremio.py::TestDremio::test_date_sub
+tests/dialects/test_postgres.py::TestPostgres::test_ddl
+tests/dialects/test_postgres.py::TestPostgres::test_postgres
+tests/dialects/test_presto.py::TestPresto::test_cast
+tests/test_expressions.py::TestExprs::test_cast
+tests/test_serde.py::TestSerde::test_serde
+tests/test_transpile.py::TestTranspile::test_identity

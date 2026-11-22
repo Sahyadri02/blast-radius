@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generators/athena.py b/sqlglot/generators/athena.py
+index 08a05b76b..19a24bd3e 100644
+--- a/sqlglot/generators/athena.py
++++ b/sqlglot/generators/athena.py
+@@ -112,6 +112,8 @@ class _HiveGenerator(HiveGenerator):
+ 
+         return super().alter_sql(expression)
+ 
++    SAFE_INT_DIVISION = True
++
+ 
+ class AthenaTrinoGenerator(TrinoGenerator):
+     PROPERTIES_LOCATION = {
