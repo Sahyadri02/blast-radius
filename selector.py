@@ -872,20 +872,6 @@ def run_phase(pool, plans, tests, ms):
         log(cid, "ran", len(run), "est", round(est, 2), "cpu", pool.cpu.get(cid), "fail", len(fails))
     return out
 
-RISKY = ("sqlglot/optimizer/", "sqlglot/executor/", "sqlglot/planner.py", "sqlglot/serde.py",
-         "sqlglot/expressions/", "sqlglot/tokenizer_core.py", "sqlglot/trie.py", "sqlglot/schema.py")
-
-def _dialect_only(patch):
-    """GAMBLE: run the slow tests only when a changed file is where slow tests have failed before."""
-    try:
-        import re as _re
-        fs = _re.findall(r"^diff --git a/(\S+)", patch.read_text(errors="replace"), _re.M)
-    except Exception:
-        return False
-    if not fs:
-        return False
-    return not any(f.startswith(RISKY) for f in fs)
-
 def main():
     import gc, time
     T0[0] = time.time()
@@ -947,8 +933,6 @@ def main():
         except Exception as e:
             log(cid, "error", repr(e)); sel = ALL
         nums = [i for i in range(n) if sel >> i & 1]
-        if _dialect_only(patch):  # GAMBLE: dialect-specific edits never run the slow tests
-            nums = [i for i in nums if ms[i] <= 3000]
         workers = split(nums, ms)
         if cost(workers, ms) >= all_cost:
             workers = all_workers  # running everything costs no more: take the safe option
