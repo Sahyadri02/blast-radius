@@ -872,6 +872,22 @@ def run_phase(pool, plans, tests, ms):
         log(cid, "ran", len(run), "est", round(est, 2), "cpu", pool.cpu.get(cid), "fail", len(fails))
     return out
 
+def _dialect_only(patch):
+    try:
+        import re as _re
+        fs = _re.findall(r"^diff --git a/(\S+)", patch.read_text(errors="replace"), _re.M)
+    except Exception:
+        return False
+    if not fs:
+        return False
+    for f in fs:
+        parts = f.split("/")
+        if len(parts) != 3 or parts[0] != "sqlglot" or parts[1] not in ("dialects", "parsers", "generators", "typing"):
+            return False
+        if parts[2] in ("dialect.py", "__init__.py"):
+            return False
+    return True
+
 def main():
     import gc, time
     T0[0] = time.time()
@@ -923,7 +939,7 @@ def main():
         return filemask_cache[path]
     ms = [round(t["seconds"] * 1000) for t in tests]
 
-    all_workers = split([i for i in range(n) if ms[i] <= 3000], ms)
+    all_workers = split(list(range(n)), ms)
     all_cost = cost(all_workers, ms)
     plans = []; results = {}
     for patch in sorted((DATA / "commits").glob("*.patch")):
@@ -932,7 +948,9 @@ def main():
             sel = select(patch.read_text(errors="replace"), LINES, IMP, READS, by_file, filemask, ALL, CLASSES)
         except Exception as e:
             log(cid, "error", repr(e)); sel = ALL
-        nums = [i for i in range(n) if sel >> i & 1 and ms[i] <= 3000]  # GAMBLE: never run slow tests
+        nums = [i for i in range(n) if sel >> i & 1]
+        if _dialect_only(patch):  # GAMBLE: dialect-specific edits never run the slow tests
+            nums = [i for i in nums if ms[i] <= 3000]
         workers = split(nums, ms)
         if cost(workers, ms) >= all_cost:
             workers = all_workers  # running everything costs no more: take the safe option
