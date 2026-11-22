@@ -213,8 +213,12 @@ def _class(h, cls, depth):
 
 
 def detail():
-    """Per-table view of import-time state: {"c": {table: {key: digest}}, "a": {name: digest}}.
-    Tables are exact dicts with nameable keys; everything else is one digest per name."""
+    """Per-table view of import-time state:
+    {"c": {table: {key: digest}}, "e": {set: ["#set"|"#frozenset", element keys...]},
+     "s": {class: {ATTR: [digest, definer]}}, "a": {name: digest}}.
+    Tables are exact dicts with nameable keys; "e" holds sets whose elements all have a
+    stable key; "s" holds the scalar UPPER_CASE settings every Dialect/Tokenizer/Parser/
+    Generator class resolves (inherited ones included); everything else is one digest per name."""
     import os
     import sqlglot
     if not os.path.abspath(sqlglot.__file__).startswith(os.path.abspath(sys.path[0])):
@@ -224,16 +228,20 @@ def detail():
             continue
         importlib.import_module(m.name)
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from brtrack import walk_tables, krepr
+    from brtrack import walk_tables, krepr, set_keys, named_classes, family_classes, \
+        resolved_scalars, is_scalar, _UPPER
     mods = {n: sys.modules[n] for n in sys.modules if n == "sqlglot" or n.startswith("sqlglot.")}
-    c, a = {}, {}
+    c, a, e = {}, {}, {}
+    names = named_classes(mods)
+    fam = {id(k) for k in family_classes(names)}
     seen_cls = set()
     memo = {}  # id -> (obj, digest): tables share most of their values across dialects
+    ememo = {}
 
     def dig(x):
-        e = memo.get(id(x))
-        if e is not None and e[0] is x:
-            return e[1]
+        m = memo.get(id(x))
+        if m is not None and m[0] is x:
+            return m[1]
         h = hashlib.blake2b(digest_size=8)
         _feed(h, x, 0, set())
         d = h.hexdigest()
@@ -254,8 +262,18 @@ def detail():
                     ent[kr] = dig(x)
                 c[name] = ent
                 continue
+        if type(v) in (set, frozenset) and not attr.startswith("__"):
+            m = ememo.get(id(v))
+            if m is None or m[0] is not v:
+                m = ememo[id(v)] = (v, set_keys(v))
+            if m[1] is not None:
+                e[name] = ["#" + type(v).__name__] + m[1]
+                continue
+        if is_class and id(owner) in fam and _UPPER.match(attr) and is_scalar(v):
+            continue  # in "s", resolved per class
         a[name] = dig(v)
-    return {"c": c, "a": a}
+    s = resolved_scalars(names)
+    return {"c": c, "a": a, "e": e, "s": s}
 
 
 if __name__ == "__main__":

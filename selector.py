@@ -895,6 +895,9 @@ def main():
     if "tacc" in M:
         TABLES.update({k: M[k] for k in ("tacc", "tphase", "talias", "tderived")})
         TABLES["tleaky"] = set(M["tleaky"])
+    if "sacc" in M:
+        TABLES.update({k: M[k] for k in ("sacc", "sphase", "salias")})
+        TABLES["sleaky"] = set(M["sleaky"]); TABLES["vdefs"] = set(M["vdefs"]); TABLES["vleaky"] = set(M["vleaky"])
     for c, m in CLASSES.items():
         CLASS_BY_MODULE.setdefault(c.split(":")[0] + ":", []).append((c, m))
     counts = [0] * n
@@ -1434,9 +1437,37 @@ def table_diff():
                 for n in set(ba) | set(ga):
                     if ba.get(n) != ga.get(n):
                         A.append(n)
-                res = (D, A)
+                # sets tracked per element: elements added or removed
+                E = []
+                be, ge = base.get("e", {}), got.get("e", {})
+                for n in set(be) | set(ge):
+                    x, y = be.get(n), ge.get(n)
+                    if x == y:
+                        continue
+                    if x is None or y is None or x[0] != y[0]:
+                        A.append(n); continue  # set appeared, vanished or changed type
+                    for k in set(x).symmetric_difference(y):
+                        E.append((n, k))
+                # scalar settings, as each dialect-family class resolves them
+                S = []
+                bs, gs = base.get("s", {}), got.get("s", {})
+                for ck in set(bs) | set(gs):
+                    x, y = bs.get(ck), gs.get(ck)
+                    if x == y:
+                        continue
+                    if x is None or y is None:
+                        A.append("s:" + ck); continue
+                    for X in set(x) | set(y):
+                        if x.get(X) == y.get(X):
+                            continue
+                        if X not in x:
+                            A.append("s:" + ck + "." + X); continue  # newly resolvable: getattr defaults leave no trace
+                        if X in y and x[X][0] == y[X][0]:
+                            continue  # same value, now defined elsewhere
+                        S.append((ck, X, x[X][1]))
+                res = (D, A, E, S)
         elif base and not changed:
-            res = ([], [])
+            res = ([], [], [], [])
     except Exception as e:
         log("table diff error", repr(e))
         res = None
@@ -1447,33 +1478,66 @@ def fingerprint_unchanged():
     """Does importing sqlglot with this commit's changes build exactly the same
     state (tables, settings, registries, defaults, expressions) as the original?"""
     d = table_diff()
-    return d is not None and not d[0] and not d[1]
+    return d is not None and not any(d)
 
 def table_mask():
-    """When the only import-time changes are entries of tracked tables, the tests that
-    read those entries (or the whole table) at test time; None when that is not known."""
+    """When the only import-time changes are entries of tracked tables, elements of tracked
+    sets or tracked scalar settings, the tests that read those (or the whole table/set) at
+    test time; None when that is not known."""
     d = table_diff()
     if d is None or d[1] or not TABLES:
         return None
-    D = d[0]
-    if not D:
-        return 0
-    acc, ph, alias, leaky, derived = TABLES["tacc"], TABLES["tphase"], TABLES["talias"], TABLES["tleaky"], TABLES["tderived"]
+    D, E, S = d[0], d[2], d[3]
     m = 0
-    for n, k, keyset_changed in D:
-        c = alias.get(n)
-        if c is None or c in leaky:
+    if D:
+        acc, ph, alias, leaky, derived = TABLES["tacc"], TABLES["tphase"], TABLES["talias"], TABLES["tleaky"], TABLES["tderived"]
+        for n, k, keyset_changed in D:
+            c = alias.get(n)
+            if c is None or c in leaky:
+                return None
+            names = [c] + [x for x, src in derived.items() if src == c]
+            for nm in names:
+                keys = [k, "*"] + (["#len"] if keyset_changed else [])
+                for kk in keys:
+                    for p in ph.get(nm, {}).get(kk, ()):
+                        if p in ("warmup", "other") or (p == "warmuse" and kk != k):
+                            return None  # read while dialects were set up or outside tests
+                    v = acc.get(nm, {}).get(kk)
+                    if v:
+                        m |= int(v, 16)
+    if E or S:
+        if "sacc" not in TABLES:
             return None
-        names = [c] + [x for x, src in derived.items() if src == c]
-        for nm in names:
-            keys = [k, "*"] + (["#len"] if keyset_changed else [])
-            for kk in keys:
-                for p in ph.get(nm, {}).get(kk, ()):
-                    if p in ("warmup", "other") or (p == "warmuse" and kk != k):
-                        return None  # read while dialects were set up or outside tests
-                v = acc.get(nm, {}).get(kk)
-                if v:
-                    m |= int(v, 16)
+        sacc, sph = TABLES["sacc"], TABLES["sphase"]
+
+        def readers(nm, kk, warmuse_ok):
+            for p in sph.get(nm, {}).get(kk, ()):
+                if p in ("warmup", "other") or (p == "warmuse" and not warmuse_ok):
+                    return None  # read while dialects were set up or outside tests
+            v = sacc.get(nm, {}).get(kk)
+            return int(v, 16) if v else 0
+
+        salias, sleaky = TABLES["salias"], TABLES["sleaky"]
+        for n, k in E:
+            c = salias.get(n)
+            if c is None or c in sleaky or k.startswith("#"):
+                return None
+            for kk in (k, "*"):
+                r = readers(c, kk, kk == k)
+                if r is None:
+                    return None
+                m |= r
+        vdefs, vleaky = TABLES["vdefs"], TABLES["vleaky"]
+        for ck, X, definer in S:
+            dx = definer + "." + X
+            if dx not in vdefs or dx in vleaky:
+                return None  # not tracked, or rebound while tests ran
+            names = ["v:" + ck + "." + X] + (["d:" + dx] if ck == definer else [])
+            for nm in names:
+                r = readers(nm, "v", False)
+                if r is None:
+                    return None
+                m |= r
     return m
 
 def import_only_mask(path, ln, by_file):
