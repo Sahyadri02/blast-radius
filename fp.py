@@ -228,6 +228,17 @@ def detail():
     mods = {n: sys.modules[n] for n in sys.modules if n == "sqlglot" or n.startswith("sqlglot.")}
     c, a = {}, {}
     seen_cls = set()
+    memo = {}  # id -> (obj, digest): tables share most of their values across dialects
+
+    def dig(x):
+        e = memo.get(id(x))
+        if e is not None and e[0] is x:
+            return e[1]
+        h = hashlib.blake2b(digest_size=8)
+        _feed(h, x, 0, set())
+        d = h.hexdigest()
+        memo[id(x)] = (x, d)
+        return d
     for name, owner, attr, v, is_class in walk_tables(mods):
         if is_class and id(owner) not in seen_cls:
             seen_cls.add(id(owner))
@@ -240,17 +251,10 @@ def detail():
             if None not in ks and len(set(ks)) == len(ks):
                 ent = {}
                 for kr, x in zip(ks, v.values()):
-                    h = hashlib.blake2b(digest_size=8)
-                    _feed(h, x, 0, set())
-                    ent[kr] = h.hexdigest()
+                    ent[kr] = dig(x)
                 c[name] = ent
                 continue
-        h = hashlib.blake2b(digest_size=8)
-        if isinstance(v, type) and getattr(v, "__module__", None) and is_class is False and \
-                v.__module__ == name.split(".")[0]:
-            pass
-        _feed(h, v, 0, set())
-        a[name] = h.hexdigest()
+        a[name] = dig(v)
     return {"c": c, "a": a}
 
 
