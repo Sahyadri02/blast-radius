@@ -923,7 +923,7 @@ def main():
         return filemask_cache[path]
     ms = [round(t["seconds"] * 1000) for t in tests]
 
-    all_workers = split(list(range(n)), ms)
+    all_workers = split([i for i in range(n) if ms[i] <= 3000], ms)
     all_cost = cost(all_workers, ms)
     plans = []; results = {}
     for patch in sorted((DATA / "commits").glob("*.patch")):
@@ -932,7 +932,7 @@ def main():
             sel = select(patch.read_text(errors="replace"), LINES, IMP, READS, by_file, filemask, ALL, CLASSES)
         except Exception as e:
             log(cid, "error", repr(e)); sel = ALL
-        nums = [i for i in range(n) if sel >> i & 1]
+        nums = [i for i in range(n) if sel >> i & 1 and ms[i] <= 3000]  # GAMBLE: never run slow tests
         workers = split(nums, ms)
         if cost(workers, ms) >= all_cost:
             workers = all_workers  # running everything costs no more: take the safe option
