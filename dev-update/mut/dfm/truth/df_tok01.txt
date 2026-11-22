@@ -1,0 +1,12 @@
+tests/dialects/test_bigquery.py::TestBigQuery::test_bigquery
+tests/dialects/test_bigquery.py::TestBigQuery::test_identifier_escapes
+tests/dialects/test_clickhouse.py::TestClickhouse::test_clickhouse
+tests/dialects/test_databricks.py::TestDatabricks::test_optimize
+tests/dialects/test_dialect.py::TestDialect::test_escaped_identifier_delimiter
+tests/dialects/test_duckdb.py::TestDuckDB::test_quoted_variables
+tests/dialects/test_sqlite.py::TestSQLite::test_pragma_quoted_names
+tests/dialects/test_sqlite.py::TestSQLite::test_pragma_quoted_schemas
+tests/test_jsonpath.py::TestJsonpath::test_cts_file
+tests/test_optimizer.py::TestOptimizer::test_simplify
+tests/test_parser.py::TestParser::test_ref_type
+tests/test_transpile.py::TestTranspile::test_identity

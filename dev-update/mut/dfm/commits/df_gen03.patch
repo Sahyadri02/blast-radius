@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 573d3c15d..969433a59 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -957,7 +957,7 @@ class Generator:
+         normalize_functions: str | bool | None = None,
+         unsupported_level: ErrorLevel = ErrorLevel.WARN,
+         max_unsupported: int = 3,
+-        leading_comma: bool = False,
++        leading_comma: bool = True,
+         max_text_width: int = 80,
+         comments: bool = True,
+         dialect: DialectType = None,

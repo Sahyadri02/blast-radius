@@ -1,0 +1,13 @@
+diff --git a/sqlglot/tokenizer_core.py b/sqlglot/tokenizer_core.py
+index b5f082893..75e0588b7 100644
+--- a/sqlglot/tokenizer_core.py
++++ b/sqlglot/tokenizer_core.py
+@@ -1308,7 +1308,7 @@ class TokenizerCore:
+         self,
+         delimiter: str,
+         escapes: set[str] | None = None,
+-        raw_string: bool = False,
++        raw_string: bool = True,
+         raise_unmatched: bool = True,
+         bytes_literal: bool = False,
+     ) -> str:

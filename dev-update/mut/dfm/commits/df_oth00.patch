@@ -1,0 +1,13 @@
+diff --git a/sqlglot/__init__.py b/sqlglot/__init__.py
+index 2039e77a8..8e98c0bc6 100644
+--- a/sqlglot/__init__.py
++++ b/sqlglot/__init__.py
+@@ -137,7 +137,7 @@ def parse_one(
+     sql: str,
+     read: DialectType = None,
+     dialect: DialectType = None,
+-    into: exp.IntoType | None = None,
++    into: exp.IntoType | None = False,
+     **opts: Unpack[ParserNoDialectArgs],
+ ) -> Expr:
+     """

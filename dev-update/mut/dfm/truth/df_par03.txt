@@ -1,0 +1,1 @@
+tests/dialects/test_clickhouse.py::TestClickhouse::test_cte

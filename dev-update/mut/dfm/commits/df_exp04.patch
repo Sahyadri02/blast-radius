@@ -1,0 +1,13 @@
+diff --git a/sqlglot/expressions/builders.py b/sqlglot/expressions/builders.py
+index b811238c9..b3bdfcb5e 100644
+--- a/sqlglot/expressions/builders.py
++++ b/sqlglot/expressions/builders.py
+@@ -1056,7 +1056,7 @@ def func(
+ 
+ def case(
+     expression: ExpOrStr | None = None,
+-    copy: bool = True,
++    copy: bool = False,
+     **opts: Unpack[ParserArgs],
+ ) -> Case:
+     """

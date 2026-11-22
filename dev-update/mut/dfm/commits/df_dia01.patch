@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generators/redshift.py b/sqlglot/generators/redshift.py
+index cd45e5225..58d22c870 100644
+--- a/sqlglot/generators/redshift.py
++++ b/sqlglot/generators/redshift.py
+@@ -348,7 +348,7 @@ class RedshiftGenerator(PostgresGenerator):
+         alias = self.expressions(expression.args.get("alias"), key="columns", flat=True)
+         return f"{arg} AS {alias}" if alias else arg
+ 
+-    def cast_sql(self, expression: exp.Cast, safe_prefix: str | None = None) -> str:
++    def cast_sql(self, expression: exp.Cast, safe_prefix: str | None = 'x') -> str:
+         if expression.is_type(exp.DType.JSON):
+             # Redshift doesn't support a JSON type, so casting to it is treated as a noop
+             return self.sql(expression, "this")

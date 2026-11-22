@@ -1,0 +1,13 @@
+diff --git a/sqlglot/planner.py b/sqlglot/planner.py
+index cdf8bbda9..9bc962c64 100644
+--- a/sqlglot/planner.py
++++ b/sqlglot/planner.py
+@@ -304,7 +304,7 @@ class Step:
+     def __repr__(self) -> str:
+         return self.to_s()
+ 
+-    def to_s(self, level: int = 0) -> str:
++    def to_s(self, level: int = -1) -> str:
+         indent = "  " * level
+         nested = f"{indent}    "
+ 

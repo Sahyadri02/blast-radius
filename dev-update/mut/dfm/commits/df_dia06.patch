@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generators/clickhouse.py b/sqlglot/generators/clickhouse.py
+index e4335f016..cc756bd33 100644
+--- a/sqlglot/generators/clickhouse.py
++++ b/sqlglot/generators/clickhouse.py
+@@ -515,7 +515,7 @@ class ClickHouseGenerator(generator.Generator):
+ 
+         return strtodate_sql
+ 
+-    def cast_sql(self, expression: exp.Cast, safe_prefix: str | None = None) -> str:
++    def cast_sql(self, expression: exp.Cast, safe_prefix: str | None = 'x') -> str:
+         this = expression.this
+ 
+         if isinstance(this, exp.StrToDate) and expression.to == exp.DType.DATETIME.into_expr():

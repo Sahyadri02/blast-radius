@@ -1,0 +1,13 @@
+diff --git a/sqlglot/expressions/dml.py b/sqlglot/expressions/dml.py
+index 49d386a34..1bb003e53 100644
+--- a/sqlglot/expressions/dml.py
++++ b/sqlglot/expressions/dml.py
+@@ -311,7 +311,7 @@ class Update(Expression, DML):
+         self,
+         expression: ExpOrStr,
+         dialect: DialectType = None,
+-        copy: bool = True,
++        copy: bool = False,
+         **opts: Unpack[ParserNoDialectArgs],
+     ) -> Update:
+         """

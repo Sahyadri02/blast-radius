@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generators/postgres.py b/sqlglot/generators/postgres.py
+index 1db4172cd..d8220b7bb 100644
+--- a/sqlglot/generators/postgres.py
++++ b/sqlglot/generators/postgres.py
+@@ -508,7 +508,7 @@ class PostgresGenerator(generator.Generator):
+         self.unsupported("Column comments are not supported in the CREATE statement")
+         return ""
+ 
+-    def columndef_sql(self, expression: exp.ColumnDef, sep: str = " ") -> str:
++    def columndef_sql(self, expression: exp.ColumnDef, sep: str = ' X') -> str:
+         # PostgreSQL places parameter modes BEFORE parameter name
+         param_constraint = expression.find(exp.InOutColumnConstraint)
+ 

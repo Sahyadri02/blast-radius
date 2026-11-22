@@ -1,0 +1,13 @@
+diff --git a/sqlglot/schema.py b/sqlglot/schema.py
+index 0e8716a38..78896d8de 100644
+--- a/sqlglot/schema.py
++++ b/sqlglot/schema.py
+@@ -77,7 +77,7 @@ class Schema(abc.ABC):
+         self,
+         table: exp.Table | str,
+         column: exp.Column | str,
+-        dialect: DialectType = None,
++        dialect: DialectType = False,
+         normalize: bool | None = None,
+     ) -> exp.DataType:
+         """

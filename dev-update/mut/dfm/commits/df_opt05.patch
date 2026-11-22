@@ -1,0 +1,13 @@
+diff --git a/sqlglot/optimizer/simplify.py b/sqlglot/optimizer/simplify.py
+index 48b762d25..5be88ef00 100644
+--- a/sqlglot/optimizer/simplify.py
++++ b/sqlglot/optimizer/simplify.py
+@@ -191,7 +191,7 @@ def simplify_parens(expression: exp.Expr, dialect: DialectType) -> exp.Expr:
+     return expression
+ 
+ 
+-def propagate_constants(expression, root=True):
++def propagate_constants(expression, root=False):
+     """
+     Propagate constants for conjunctions in DNF:
+ 

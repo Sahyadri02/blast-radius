@@ -1,0 +1,13 @@
+diff --git a/sqlglot/lineage.py b/sqlglot/lineage.py
+index b887c7133..245f0255c 100644
+--- a/sqlglot/lineage.py
++++ b/sqlglot/lineage.py
+@@ -207,7 +207,7 @@ def to_node(
+     source_name: str | None = None,
+     reference_node_name: str | None = None,
+     trim_selects: bool = True,
+-    _cache: dict[tuple, Node] | None = None,
++    _cache: dict[tuple, Node] | None = False,
+     _scope_meta: dict[int, tuple[bool, dict[str, exp.Expr]]] | None = None,
+     on_node: t.Callable[[Node], None] | None = None,
+ ) -> Node:

@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parsers/teradata.py b/sqlglot/parsers/teradata.py
+index c92630bf8..12fc33e58 100644
+--- a/sqlglot/parsers/teradata.py
++++ b/sqlglot/parsers/teradata.py
+@@ -303,7 +303,7 @@ class TeradataParser(parser.Parser):
+         self,
+         functions: dict[str, t.Callable] | None = None,
+         anonymous: bool = False,
+-        optional_parens: bool = True,
++        optional_parens: bool = False,
+         any_token: bool = False,
+     ) -> exp.Expr | None:
+         # Column data attributes are not function arguments.

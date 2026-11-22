@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 573d3c15d..c8c0ff9e4 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -1265,7 +1265,7 @@ class Generator:
+         position = self.sql(expression, "position")
+         return f"{position}{this}"
+ 
+-    def columndef_sql(self, expression: exp.ColumnDef, sep: str = " ") -> str:
++    def columndef_sql(self, expression: exp.ColumnDef, sep: str = ' X') -> str:
+         column = self.sql(expression, "this")
+         kind = self.sql(expression, "kind")
+         constraints = self.expressions(expression, key="constraints", sep=" ", flat=True)

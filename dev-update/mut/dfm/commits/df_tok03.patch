@@ -1,0 +1,13 @@
+diff --git a/sqlglot/tokenizer_core.py b/sqlglot/tokenizer_core.py
+index b5f082893..af56b8584 100644
+--- a/sqlglot/tokenizer_core.py
++++ b/sqlglot/tokenizer_core.py
+@@ -746,7 +746,7 @@ class TokenizerCore:
+ 
+         return self.sql[start:end] if end <= self.size else ""
+ 
+-    def _advance(self, i: int = 1, alnum: bool = False) -> None:
++    def _advance(self, i: int = 1, alnum: bool = True) -> None:
+         char = self._char
+ 
+         if char == "\n" or char == "\r":

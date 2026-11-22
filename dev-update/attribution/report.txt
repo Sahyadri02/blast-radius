@@ -1,0 +1,33 @@
+commits 283  total cost 2241.0  oracle 662.5  waste 1578.6
+rule (charged the commit waste)                         commits   waste s exclusive-saving s
+line coverage                                                61     376.0              371.3
+ALL: import probe failed                                      8     240.1              240.1
+table rule (added code)                                      75     226.2              226.2
+ALL: added core code, state changed                           6     184.7              184.7
+added class code -> CLASSES                                   3     106.0              106.0
+table rule (import line)                                     20     102.8              102.8
+ALL: import-time fallback (fallback: core in-function ALL)       4      88.0               88.0
+ALL: removed name in dialect/core                             2      71.6               71.6
+test-file edit                                                2      44.0               42.0
+ALL: import-time fallback (fallback: dialect family)          1      36.8               36.8
+ALL: syntax/compile                                           1      34.8               34.8
+fallback: CLASSES                                             1      23.5                0.0
+_sql_names anonymous                                          2      15.3                8.6
+data-file readers                                            20       9.6                9.7
+removed name -> importers                                     1       9.3                0.0
+lambda rule                                                  17       7.5                5.5
+fallback: dialect family [added code]                         1       2.2                1.2
+_sql_names owner                                              0       0.0                0.0
+nothing selected                                             58       0.0                0.0
+
+Top 10 by waste among commits with no failing slow test (>= 2 s):
+  codex2  n06presto    cost   36.8 oracle   0.0 waste   36.8 sel  1620 fail   0  <- ALL: import probe failed
+  codex2  n07twofile   cost   36.8 oracle   0.0 waste   36.8 sel  1620 fail   0  <- ALL: import-time fallback (fallback: dialect family)
+  codex2  n10renameathena cost   36.8 oracle   0.0 waste   36.8 sel  1620 fail   0  <- ALL: removed name in dialect/core
+  ds      d02helpers   cost   36.8 oracle   0.0 waste   36.8 sel  1620 fail   0  <- test-file edit
+  setsc   sc_tok00     cost   36.8 oracle   0.0 waste   36.8 sel  1620 fail   0  <- added class code -> CLASSES
+  setsc   se_exp00     cost   36.8 oracle   0.0 waste   36.8 sel  1620 fail   0  <- ALL: added core code, state changed
+  setsc   se_par03     cost   36.8 oracle   0.0 waste   36.8 sel  1620 fail   0  <- table rule (import line)
+  codex   c4dispatch   cost   36.8 oracle   2.0 waste   34.8 sel  1620 fail   1  <- ALL: import-time fallback (fallback: core in-function ALL)
+  codex   c9coding     cost   36.8 oracle   2.0 waste   34.8 sel  1620 fail   1  <- ALL: syntax/compile
+  codex2  n08reexport  cost   36.8 oracle   2.0 waste   34.8 sel  1620 fail   1  <- ALL: removed name in dialect/core

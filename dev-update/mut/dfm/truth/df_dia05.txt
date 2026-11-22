@@ -1,0 +1,2 @@
+tests/dialects/test_teradata.py::TestTeradata::test_current_time
+tests/dialects/test_teradata.py::TestTeradata::test_hex_character_string

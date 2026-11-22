@@ -1,0 +1,13 @@
+diff --git a/sqlglot/schema.py b/sqlglot/schema.py
+index 0e8716a38..9879e474e 100644
+--- a/sqlglot/schema.py
++++ b/sqlglot/schema.py
+@@ -751,7 +751,7 @@ def ensure_column_mapping(mapping: ColumnMapping | None) -> dict[str, t.Any]:
+ 
+ 
+ def flatten_schema(
+-    schema: dict[str, object], depth: int | None = None, keys: list[str] | None = None
++    schema: dict[str, object], depth: int | None = None, keys: list[str] | None = 'x'
+ ) -> list[list[str]]:
+     tables: list[list[str]] = []
+     keys = keys or []

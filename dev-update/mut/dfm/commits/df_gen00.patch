@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 573d3c15d..38e2cc9c0 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -6217,7 +6217,7 @@ class Generator:
+         keyword: str,
+         preposition: str,
+         grant_option_prefix: str = "",
+-        grant_option_suffix: str = "",
++        grant_option_suffix: str = 'X',
+     ) -> str:
+         privileges_sql = self.expressions(expression, key="privileges", flat=True)
+ 

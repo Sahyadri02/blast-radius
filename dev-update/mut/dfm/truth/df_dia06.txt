@@ -1,0 +1,15 @@
+tests/dialects/test_bigquery.py::TestBigQuery::test_bigquery
+tests/dialects/test_clickhouse.py::TestClickhouse::test_clickhouse
+tests/dialects/test_clickhouse.py::TestClickhouse::test_convert
+tests/dialects/test_clickhouse.py::TestClickhouse::test_geom_types
+tests/dialects/test_clickhouse.py::TestClickhouse::test_json_extract
+tests/dialects/test_clickhouse.py::TestClickhouse::test_json_extract_qualified_roundtrip
+tests/dialects/test_clickhouse.py::TestClickhouse::test_json_type
+tests/dialects/test_clickhouse.py::TestClickhouse::test_nothing_type
+tests/dialects/test_clickhouse.py::TestClickhouse::test_signed_and_unsigned_types
+tests/dialects/test_clickhouse.py::TestClickhouse::test_timestr_to_time
+tests/dialects/test_dialect.py::TestDialect::test_cast
+tests/dialects/test_dialect.py::TestDialect::test_time
+tests/dialects/test_duckdb.py::TestDuckDB::test_time
+tests/dialects/test_tsql.py::TestTSQL::test_date_diff
+tests/dialects/test_tsql.py::TestTSQL::test_eomonth

@@ -1,0 +1,2 @@
+tests/dialects/test_postgres.py::TestPostgres::test_revoke
+tests/test_transpile.py::TestTranspile::test_identity

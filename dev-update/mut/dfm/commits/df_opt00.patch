@@ -1,0 +1,13 @@
+diff --git a/sqlglot/optimizer/qualify_columns.py b/sqlglot/optimizer/qualify_columns.py
+index a7a0c0135..f619439cd 100644
+--- a/sqlglot/optimizer/qualify_columns.py
++++ b/sqlglot/optimizer/qualify_columns.py
+@@ -386,7 +386,7 @@ def _expand_alias_refs(
+     replaced = False
+ 
+     def replace_columns(
+-        node: exp.Expr | None, resolve_table: bool = False, literal_index: bool = False
++        node: exp.Expr | None, resolve_table: bool = False, literal_index: bool = True
+     ) -> None:
+         nonlocal replaced
+         is_group_by = isinstance(node, exp.Group)

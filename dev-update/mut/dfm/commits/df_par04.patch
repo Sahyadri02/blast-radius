@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..51de881e3 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -2335,7 +2335,7 @@ class Parser:
+         self,
+         parse_method: t.Callable[[Parser], exp.Expr | None],
+         raw_tokens: list[Token],
+-        sql: str | None = None,
++        sql: str | None = 'x',
+     ) -> list[exp.Expr | None]:
+         self.reset()
+         self.sql = sql or ""

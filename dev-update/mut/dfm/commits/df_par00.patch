@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..864096af7 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -8311,7 +8311,7 @@ class Parser:
+         self,
+         wrapped_optional: bool = False,
+         in_props: bool = False,
+-        named_primary_key: bool = False,
++        named_primary_key: bool = True,
+     ) -> exp.PrimaryKeyColumnConstraint | exp.PrimaryKey:
+         desc = (
+             self._prev.token_type == TokenType.DESC

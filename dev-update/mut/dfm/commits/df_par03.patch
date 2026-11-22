@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..93fdd429a 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -9379,7 +9379,7 @@ class Parser:
+             lambda: self._parse_csv(parse_method, sep=sep), optional=optional
+         )
+ 
+-    def _parse_wrapped(self, parse_method: t.Callable[[], T], optional: bool = False) -> T:
++    def _parse_wrapped(self, parse_method: t.Callable[[], T], optional: bool = True) -> T:
+         wrapped = self._match(TokenType.L_PAREN)
+         if not wrapped and not optional:
+             self.raise_error("Expecting (")

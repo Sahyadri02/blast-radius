@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parsers/mysql.py b/sqlglot/parsers/mysql.py
+index 3ba279adf..bdfcef3f0 100644
+--- a/sqlglot/parsers/mysql.py
++++ b/sqlglot/parsers/mysql.py
+@@ -713,7 +713,7 @@ class MySQLParser(parser.Parser):
+         return self.expression(exp.SetItem(this=charset, collate=collate, kind="NAMES"))
+ 
+     def _parse_type(
+-        self, parse_interval: bool = True, fallback_to_identifier: bool = False
++        self, parse_interval: bool = True, fallback_to_identifier: bool = True
+     ) -> exp.Expr | None:
+         # mysql binary is special and can work anywhere, even in order by operations
+         # it operates like a no paren func

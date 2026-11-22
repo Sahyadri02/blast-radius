@@ -1,0 +1,13 @@
+diff --git a/sqlglot/dialects/athena.py b/sqlglot/dialects/athena.py
+index 626406687..56bcd6f16 100644
+--- a/sqlglot/dialects/athena.py
++++ b/sqlglot/dialects/athena.py
+@@ -68,7 +68,7 @@ class Athena(Trino):
+             "UNLOAD": TokenType.COMMAND,
+         }
+ 
+-        def __init__(self, dialect: DialectType = None) -> None:
++        def __init__(self, dialect: DialectType = False) -> None:
+             super().__init__(dialect=dialect)
+ 
+             self._hive_tokenizer = Hive().tokenizer()

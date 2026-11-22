@@ -1,0 +1,13 @@
+diff --git a/sqlglot/optimizer/merge_subqueries.py b/sqlglot/optimizer/merge_subqueries.py
+index a3ecb08bb..662f661bd 100644
+--- a/sqlglot/optimizer/merge_subqueries.py
++++ b/sqlglot/optimizer/merge_subqueries.py
+@@ -67,7 +67,7 @@ class CopyBudget:
+ 
+ def merge_subqueries(
+     expression: E,
+-    leave_tables_isolated: bool = False,
++    leave_tables_isolated: bool = True,
+     max_copy_factor: int | None = CopyBudget.MAX_COPY_FACTOR,
+     min_copy_budget: int = CopyBudget.MIN_COPY_BUDGET,
+ ) -> E:

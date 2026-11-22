@@ -1,0 +1,13 @@
+diff --git a/sqlglot/optimizer/annotate_types.py b/sqlglot/optimizer/annotate_types.py
+index 0b06af8e2..869b7c93e 100644
+--- a/sqlglot/optimizer/annotate_types.py
++++ b/sqlglot/optimizer/annotate_types.py
+@@ -198,7 +198,7 @@ class TypeAnnotator:
+         schema: Schema,
+         expression_metadata: ExprMetadataType | None = None,
+         coerces_to: dict[exp.DType, set[exp.DType]] | None = None,
+-        binary_coercions: BinaryCoercions | None = None,
++        binary_coercions: BinaryCoercions | None = False,
+         overwrite_types: bool = True,
+     ) -> None:
+         self.schema = schema

@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 573d3c15d..9432b8842 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -5057,7 +5057,7 @@ class Generator:
+         *args: t.Any,
+         prefix: str = "(",
+         suffix: str = ")",
+-        normalize: bool = True,
++        normalize: bool = False,
+     ) -> str:
+         name = self.normalize_func(name) if normalize else name
+         return f"{name}{prefix}{self.format_args(*args)}{suffix}"

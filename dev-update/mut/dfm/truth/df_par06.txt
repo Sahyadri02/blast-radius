@@ -1,0 +1,5 @@
+tests/dialects/test_oracle.py::TestOracle::test_full_procedure
+tests/dialects/test_tsql.py::TestTSQL::test_ddl
+tests/dialects/test_tsql.py::TestTSQL::test_procedures
+tests/dialects/test_tsql.py::TestTSQL::test_tsql
+tests/dialects/test_tsql.py::TestTSQL::test_udf

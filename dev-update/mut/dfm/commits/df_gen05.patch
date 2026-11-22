@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 573d3c15d..4bfe916be 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -5078,7 +5078,7 @@ class Generator:
+     def format_time(
+         self,
+         expression: exp.Expr,
+-        inverse_time_mapping: dict[str, str] | None = None,
++        inverse_time_mapping: dict[str, str] | None = 'x',
+         inverse_time_trie: dict | None = None,
+     ) -> str | None:
+         return format_time(

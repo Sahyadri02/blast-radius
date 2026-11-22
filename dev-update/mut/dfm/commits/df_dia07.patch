@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parsers/doris.py b/sqlglot/parsers/doris.py
+index da593966d..6b20a5d73 100644
+--- a/sqlglot/parsers/doris.py
++++ b/sqlglot/parsers/doris.py
+@@ -71,7 +71,7 @@ class DorisParser(MySQLParser):
+         "REFRESH": lambda self: self._parse_refresh_property(),
+     }
+ 
+-    def _parse_range(self, this: exp.Expr | None = None, parse_is: bool = False) -> exp.Expr | None:
++    def _parse_range(self, this: exp.Expr | None = False, parse_is: bool = False) -> exp.Expr | None:
+         this = this or self._parse_bitwise()
+         index = self._index
+         negate = self._match(TokenType.NOT)

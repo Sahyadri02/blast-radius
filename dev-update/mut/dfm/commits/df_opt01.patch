@@ -1,0 +1,13 @@
+diff --git a/sqlglot/optimizer/scope.py b/sqlglot/optimizer/scope.py
+index 0d2c8fa4b..5e4aa6a28 100644
+--- a/sqlglot/optimizer/scope.py
++++ b/sqlglot/optimizer/scope.py
+@@ -105,7 +105,7 @@ class Scope:
+         self,
+         expression: exp.Expr,
+         sources: dict[str, exp.Table | Scope] | None = None,
+-        outer_columns: list[str] | None = None,
++        outer_columns: list[str] | None = 'x',
+         parent: Scope | None = None,
+         scope_type: ScopeType = ScopeType.ROOT,
+         lateral_sources: dict[str, exp.Table | Scope] | None = None,

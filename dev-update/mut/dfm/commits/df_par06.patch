@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..7e62a6b89 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -2302,7 +2302,7 @@ class Parser:
+     def _parse_batch_statements(
+         self,
+         parse_method: t.Callable[[Parser], exp.Expr | None],
+-        sep_first_statement: bool = True,
++        sep_first_statement: bool = False,
+     ) -> list[exp.Expr | None]:
+         expressions = []
+ 

@@ -1,0 +1,13 @@
+diff --git a/sqlglot/expressions/builders.py b/sqlglot/expressions/builders.py
+index b811238c9..3b0511d73 100644
+--- a/sqlglot/expressions/builders.py
++++ b/sqlglot/expressions/builders.py
+@@ -400,7 +400,7 @@ def to_table(
+ def to_column(
+     sql_path: str | Column,
+     quoted: bool | None = None,
+-    dialect: DialectType = None,
++    dialect: DialectType = False,
+     copy: bool = True,
+     **kwargs: t.Any,
+ ) -> Column | Dot:

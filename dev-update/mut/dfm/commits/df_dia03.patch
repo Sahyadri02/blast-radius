@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generators/postgres.py b/sqlglot/generators/postgres.py
+index 1db4172cd..126401e52 100644
+--- a/sqlglot/generators/postgres.py
++++ b/sqlglot/generators/postgres.py
+@@ -592,7 +592,7 @@ class PostgresGenerator(generator.Generator):
+ 
+         return super().datatype_sql(expression)
+ 
+-    def cast_sql(self, expression: exp.Cast, safe_prefix: str | None = None) -> str:
++    def cast_sql(self, expression: exp.Cast, safe_prefix: str | None = 'x') -> str:
+         this = expression.this
+ 
+         # Postgres casts DIV() to decimal for transpilation but when roundtripping it's superfluous

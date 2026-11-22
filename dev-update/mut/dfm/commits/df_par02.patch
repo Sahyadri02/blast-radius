@@ -1,0 +1,13 @@
+diff --git a/sqlglot/parser.py b/sqlglot/parser.py
+index 456314b26..d1f9e3a21 100644
+--- a/sqlglot/parser.py
++++ b/sqlglot/parser.py
+@@ -4117,7 +4117,7 @@ class Parser:
+     ) -> tuple[list[exp.Expr], list[exp.Expr] | None]:
+         return self._parse_expressions(), None
+ 
+-    def _parse_wrapped_select(self, table: bool = False) -> exp.Expr | None:
++    def _parse_wrapped_select(self, table: bool = True) -> exp.Expr | None:
+         if self._match_set((TokenType.PIVOT, TokenType.UNPIVOT)):
+             this: exp.Expr | None = self._parse_simplified_pivot(
+                 is_unpivot=self._prev.token_type == TokenType.UNPIVOT

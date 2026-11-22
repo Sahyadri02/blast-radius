@@ -1,0 +1,13 @@
+diff --git a/sqlglot/expressions/dml.py b/sqlglot/expressions/dml.py
+index 49d386a34..05fb69ba0 100644
+--- a/sqlglot/expressions/dml.py
++++ b/sqlglot/expressions/dml.py
+@@ -222,7 +222,7 @@ class Insert(Expression, DDL, DML):
+         recursive: bool | None = None,
+         materialized: bool | None = None,
+         append: bool = True,
+-        dialect: DialectType = None,
++        dialect: DialectType = False,
+         copy: bool = True,
+         **opts: Unpack[ParserNoDialectArgs],
+     ) -> Insert:

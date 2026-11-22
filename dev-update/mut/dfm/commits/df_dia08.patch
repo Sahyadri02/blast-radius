@@ -1,0 +1,13 @@
+diff --git a/sqlglot/dialects/oracle.py b/sqlglot/dialects/oracle.py
+index 9330c033e..9763fa551 100644
+--- a/sqlglot/dialects/oracle.py
++++ b/sqlglot/dialects/oracle.py
+@@ -54,7 +54,7 @@ class Oracle(Dialect):
+ 
+     PSEUDOCOLUMNS = {"ROWNUM", "ROWID", "OBJECT_ID", "OBJECT_VALUE", "LEVEL"}
+ 
+-    def can_quote(self, identifier: exp.Identifier, identify: str | bool = "safe") -> bool:
++    def can_quote(self, identifier: exp.Identifier, identify: str | bool = 'saf') -> bool:
+         # Disable quoting for pseudocolumns as it may break queries e.g
+         # `WHERE "ROWNUM" = ...` does not work but `WHERE ROWNUM = ...` does
+         return (

@@ -1,0 +1,13 @@
+diff --git a/sqlglot/generator.py b/sqlglot/generator.py
+index 573d3c15d..7339b0b7e 100644
+--- a/sqlglot/generator.py
++++ b/sqlglot/generator.py
+@@ -950,7 +950,7 @@ class Generator:
+     def __init__(
+         self,
+         pretty: bool | int | None = None,
+-        identify: str | bool = False,
++        identify: str | bool = True,
+         normalize: bool = False,
+         pad: int = 2,
+         indent: int = 2,
