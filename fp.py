@@ -212,7 +212,61 @@ def _class(h, cls, depth):
         h.update(b";")
 
 
+def detail():
+    """Per-table view of import-time state: {"c": {table: {key: digest}}, "a": {name: digest}}.
+    Tables are exact dicts with nameable keys; everything else is one digest per name."""
+    import os
+    import sqlglot
+    if not os.path.abspath(sqlglot.__file__).startswith(os.path.abspath(sys.path[0])):
+        raise SystemExit("wrong sqlglot imported")
+    for m in pkgutil.walk_packages(sqlglot.__path__, "sqlglot."):
+        if m.name.endswith("__main__"):
+            continue
+        importlib.import_module(m.name)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from brtrack import walk_tables, krepr
+    mods = {n: sys.modules[n] for n in sys.modules if n == "sqlglot" or n.startswith("sqlglot.")}
+    c, a = {}, {}
+    seen_cls = set()
+    for name, owner, attr, v, is_class in walk_tables(mods):
+        if is_class and id(owner) not in seen_cls:
+            seen_cls.add(id(owner))
+            h = hashlib.blake2b(digest_size=8)
+            h.update(type(owner).__qualname__.encode())
+            h.update(",".join(x.__module__ + "." + x.__qualname__ for x in owner.__mro__).encode())
+            a[name.rsplit(".", 1)[0] + "#meta"] = h.hexdigest()
+        if type(v) is dict:
+            ks = [krepr(k) for k in v]
+            if None not in ks and len(set(ks)) == len(ks):
+                ent = {}
+                for kr, x in zip(ks, v.values()):
+                    h = hashlib.blake2b(digest_size=8)
+                    _feed(h, x, 0, set())
+                    ent[kr] = h.hexdigest()
+                c[name] = ent
+                continue
+        h = hashlib.blake2b(digest_size=8)
+        if isinstance(v, type) and getattr(v, "__module__", None) and is_class is False and \
+                v.__module__ == name.split(".")[0]:
+            pass
+        _feed(h, v, 0, set())
+        a[name] = h.hexdigest()
+    return {"c": c, "a": a}
+
+
 if __name__ == "__main__":
+    if sys.argv[1] == "--detail":
+        root = sys.argv[2]
+        sys.path.insert(0, root)
+        import io
+        real = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            fp = detail()
+        finally:
+            sys.stdout = real
+        print(json.dumps(fp, sort_keys=True))
+        raise SystemExit(0)
     root = sys.argv[1]
     sys.path.insert(0, root)
     import io

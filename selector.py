@@ -806,8 +806,76 @@ def code_tokens(text):
         toks.append((t.type, t.string))
     return toks
 
+RUN_MAX_MS = 3000      # tests longer than this are never run here, only selected
+RUN_BUDGET_S = 120     # stop starting test runs this long after start
+T0 = [0.0]
+
+def start_pool():
+    if os.environ.get("BR_RUN", "1") == "0" or not (APP / "runner.py").exists():
+        return None
+    try:
+        sys.path.insert(0, str(APP))
+        import trun
+        return trun.Pool(2)
+    except Exception as e:
+        log("pool error", repr(e))
+        return None
+
+def run_phase(pool, plans, tests, ms):
+    """plans: [(cid, patch_text, nums)]. Runs the cheap selected tests of each commit
+    against the patched tree when that is expected to cost less than selecting them;
+    returns {cid: nums} with passing tests dropped."""
+    import time
+    import trun
+    try:
+        cc = json.loads((APP / "classcost.json").read_text())
+    except Exception:
+        cc = {}
+    jobs = []; meta = {}
+    for cid, text, nums in plans:
+        if not nums:
+            continue
+        run = [i for i in nums if ms[i] <= RUN_MAX_MS]
+        keep = [i for i in nums if ms[i] > RUN_MAX_MS]
+        if not run:
+            continue
+        classes = {tests[i]["id"].rsplit("::", 1)[0] for i in run}
+        est = 0.15 + sum(max(0.0, cc.get(c, 0.3) - 0.08) for c in classes) + sum(ms[i] for i in run) / 1000
+        gain = (cost(split(nums, ms), ms) - cost(split(keep, ms), ms)) / 1000 - est
+        if gain < 0.25:
+            continue
+        try:
+            pf = parse_patch(text)
+            if any(not (p.startswith("sqlglot/") or p.startswith("tests/")) for p in pf) or \
+                    any((f.get("old") or "").startswith("sqlglotc") for f in pf.values()):
+                continue
+            files = trun.patched_files(text, str(SRC), parse_patch, apply)
+        except Exception:
+            files = None
+        if files is None:
+            continue
+        jobs.append((cid, str(SRC), files, [tests[i]["id"] for i in run], max(15, int(4 * est) + 10)))
+        meta[cid] = (run, keep, est)
+    if not jobs:
+        return {}
+    jobs.sort(key=lambda j: -meta[j[0]][2])  # longest first
+    res = pool.run_many(jobs, deadline=T0[0] + RUN_BUDGET_S)
+    idnum = {t["id"]: t["number"] for t in tests}
+    out = {}
+    for cid, (run, keep, est) in meta.items():
+        r = res.get(cid)
+        if r is None:
+            log(cid, "run skipped/broken")
+            continue
+        fails = {idnum[x] for x in r if x in idnum}
+        out[cid] = sorted(set(keep) | (fails & set(run)))
+        log(cid, "ran", len(run), "est", round(est, 2), "cpu", pool.cpu.get(cid), "fail", len(fails))
+    return out
+
 def main():
-    import gc
+    import gc, time
+    T0[0] = time.time()
+    pool = start_pool()
     gc.disable()  # short batch run: no cyclic garbage worth collecting
     tests = json.loads((DATA / "tests.json").read_text())["tests"]
     n = len(tests)
@@ -824,6 +892,9 @@ def main():
     TESTIMP["test_upper_names"] = M.get("test_upper_names", {})
     NARROW[0] = LINES; NARROW[1] = IMP
     PHASES.update(M.get("phases", {}))
+    if "tacc" in M:
+        TABLES.update({k: M[k] for k in ("tacc", "tphase", "talias", "tderived")})
+        TABLES["tleaky"] = set(M["tleaky"])
     for c, m in CLASSES.items():
         CLASS_BY_MODULE.setdefault(c.split(":")[0] + ":", []).append((c, m))
     counts = [0] * n
@@ -851,6 +922,7 @@ def main():
 
     all_workers = split(list(range(n)), ms)
     all_cost = cost(all_workers, ms)
+    plans = []; results = {}
     for patch in sorted((DATA / "commits").glob("*.patch")):
         cid = patch.stem
         try:
@@ -861,8 +933,24 @@ def main():
         workers = split(nums, ms)
         if cost(workers, ms) >= all_cost:
             workers = all_workers  # running everything costs no more: take the safe option
-        print(json.dumps({"commit": cid, "workers": workers}))
+        plans.append((cid, patch.read_text(errors="replace"), sorted(x for w in workers for x in w)))
+        results[cid] = workers
         log(cid, len(nums), "tests", len(workers), "workers")
+    if pool is not None:
+        try:
+            ran = run_phase(pool, plans, tests, ms)
+        except Exception as e:
+            log("run phase error", repr(e)); ran = {}
+        for cid, nums in ran.items():
+            w = split(nums, ms)
+            if cost(w, ms) <= cost(results[cid], ms):
+                results[cid] = w
+        try:
+            pool.close()
+        except Exception:
+            pass
+    for cid, workers in results.items():
+        print(json.dumps({"commit": cid, "workers": workers}))
 
 def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
     sel = 0
@@ -870,6 +958,7 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
     all_new = {}
     _FP["cur"] = {}
     _FP["result"] = None
+    _FP.pop("diff", None)
     for _p, _f in parse_patch(text).items():
         if _p.startswith("sqlglot/") and _p.endswith(".py") and _f["old"] == _f["new"] and (SRC / _p).exists():
             try:
@@ -917,7 +1006,15 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                 # only the bodies of existing lambdas changed: nothing changes at import
                 # time; the tests that ran those lambda lines are the ones affected
                 fl0 = LINES.get(path, {})
-                for x in stmt_starts(old_text, lam) | lam:
+                ph0 = PHASES.get(path, {})
+                # A test that calls a lambda runs its own lines; the statement around it
+                # (often a whole table of lambdas) matters only if the lambda also ran
+                # during warm-up or test collection, where its results may be kept.
+                if all(set(ph0.get(str(x), ())) <= {"import"} for x in lam):
+                    lam_sel = lam
+                else:
+                    lam_sel = stmt_starts(old_text, lam) | lam
+                for x in lam_sel:
                     v = fl0.get(str(x))
                     if v:
                         sel |= int(v, 16)
@@ -1031,9 +1128,19 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                 import_checks[path] = new_text
             # New code added outside any function (a new method, class attribute or
             # dict entry) runs at import time even if its neighbours are runtime-only.
+            _phs = PHASES.get(path, {})
+            def _tab(lines_):
+                """Tests reading the changed table entries, when the lines run only while
+                modules load and the commit changes nothing at import but table entries."""
+                if not all(set(_phs.get(str(x), ["import"])) <= {"import"} for x in lines_):
+                    return None
+                return table_mask()
             for ln, q in outside_functions(new_text, added_new_lines(f)).items():
                 import_checks[path] = new_text
-                if stem_of(path):
+                tm = _tab([])
+                if tm is not None:
+                    sel |= tm
+                elif stem_of(path):
                     sel |= import_fallback(path, filemask, by_file, ALL, new_text, ln, CLASSES)
                 else:
                     key = path[:-3].replace("/", ".") + ":" + q if q else None
@@ -1044,7 +1151,9 @@ def select(text, LINES, IMP, READS, by_file, filemask, ALL, CLASSES=None):
                     # else: the added code leaves every import-time result unchanged
             done_fb = set()
             for ln in lns:
-                if ln in imp:
+                if ln in imp and (tm := _tab([ln])) is not None:
+                    sel |= tm
+                elif ln in imp:
                     fb_key = (stem_of(path) or enclosing_classes(old_text, ln), changed_attr(old_text, ln))
                     if fb_key in done_fb:
                         continue
@@ -1261,46 +1370,111 @@ def foreign_write(text, ln):
     return False
 
 _FP = {"base": None, "cur": None, "result": None}
+TABLES = {}
 
-def _fp_run(root):
+def _fp_run(root, detail=False):
     import subprocess
     env = dict(os.environ, PYTHONHASHSEED="0", PYTHONDONTWRITEBYTECODE="1")
-    r = subprocess.run([sys.executable, "-B", str(APP / "fp.py"), str(root)],
+    r = subprocess.run([sys.executable, "-B", str(APP / "fp.py")] + (["--detail"] if detail else []) + [str(root)],
                        capture_output=True, text=True, timeout=60, env=env)
     if r.returncode != 0:
         return None
     return json.loads(r.stdout)
 
+def _overlay(changed):
+    """A view of SRC's sqlglot package with the changed files written in (unchanged
+    files are links, so their compiled caches still apply)."""
+    import tempfile
+    root = tempfile.mkdtemp(prefix="fp_")
+    base = SRC / "sqlglot"
+    for d, ds, files in os.walk(base):
+        ds[:] = [x for x in ds if x != "__pycache__"] if False else ds
+        rel = os.path.relpath(d, SRC)
+        os.makedirs(os.path.join(root, rel), exist_ok=True)
+        for fn in files:
+            r = os.path.join(rel, fn)
+            if r in changed:
+                continue
+            os.symlink(os.path.join(d, fn), os.path.join(root, r))
+    for path, text in changed.items():
+        Path(root, path).parent.mkdir(parents=True, exist_ok=True)
+        Path(root, path).write_text(text)
+    return root
+
+def table_diff():
+    """(changed table entries, other changed names) between the import-time state with
+    this commit's source changes and without, or None if that can't be computed."""
+    if "diff" in _FP:
+        return _FP["diff"]
+    res = None
+    try:
+        if _FP.get("dbase") is None:
+            f = APP / "fp_detail.json"
+            _FP["dbase"] = json.loads(f.read_text()) if f.exists() else _fp_run(SRC, True)
+        changed = _FP["cur"] or {}
+        base = _FP["dbase"]
+        if base and changed:
+            import shutil
+            root = _overlay(changed)
+            got = _fp_run(root, True)
+            shutil.rmtree(root, ignore_errors=True)
+            if got is not None:
+                D, A = [], []
+                bc, gc_ = base["c"], got["c"]
+                for n in set(bc) | set(gc_):
+                    x, y = bc.get(n), gc_.get(n)
+                    if x is None or y is None:
+                        A.append(n); continue
+                    if x == y:
+                        continue
+                    for k in set(x) | set(y):
+                        if x.get(k) != y.get(k):
+                            D.append((n, k, (k in x) != (k in y)))
+                ba, ga = base["a"], got["a"]
+                for n in set(ba) | set(ga):
+                    if ba.get(n) != ga.get(n):
+                        A.append(n)
+                res = (D, A)
+        elif base and not changed:
+            res = ([], [])
+    except Exception as e:
+        log("table diff error", repr(e))
+        res = None
+    _FP["diff"] = res
+    return res
+
 def fingerprint_unchanged():
     """Does importing sqlglot with this commit's changes build exactly the same
     state (tables, settings, registries, defaults, expressions) as the original?"""
-    if _FP["result"] is not None:
-        return _FP["result"]
-    ok = False
-    try:
-        if _FP["base"] is None:
-            f = APP / "fp_base.json"
-            _FP["base"] = json.loads(f.read_text()) if f.exists() else _fp_run(SRC)
-        changed = _FP["cur"] or {}
-        if _FP["base"] and changed:
-            import shutil, tempfile
-            root = tempfile.mkdtemp(prefix="fp_")
-            for d, _, files in os.walk(SRC / "sqlglot"):
-                rel = os.path.relpath(d, SRC)
-                os.makedirs(os.path.join(root, rel), exist_ok=True)
-                for fn in files:
-                    if fn.endswith(".py") or fn.endswith(".typed"):
-                        shutil.copyfile(os.path.join(d, fn), os.path.join(root, rel, fn))
-            for path, text in changed.items():
-                Path(root, path).write_text(text)
-            got = _fp_run(root)
-            shutil.rmtree(root, ignore_errors=True)
-            ok = got is not None and got == _FP["base"]
-    except Exception as e:
-        log("fingerprint error", repr(e))
-        ok = False
-    _FP["result"] = ok
-    return ok
+    d = table_diff()
+    return d is not None and not d[0] and not d[1]
+
+def table_mask():
+    """When the only import-time changes are entries of tracked tables, the tests that
+    read those entries (or the whole table) at test time; None when that is not known."""
+    d = table_diff()
+    if d is None or d[1] or not TABLES:
+        return None
+    D = d[0]
+    if not D:
+        return 0
+    acc, ph, alias, leaky, derived = TABLES["tacc"], TABLES["tphase"], TABLES["talias"], TABLES["tleaky"], TABLES["tderived"]
+    m = 0
+    for n, k, keyset_changed in D:
+        c = alias.get(n)
+        if c is None or c in leaky:
+            return None
+        names = [c] + [x for x, src in derived.items() if src == c]
+        for nm in names:
+            keys = [k, "*"] + (["#len"] if keyset_changed else [])
+            for kk in keys:
+                for p in ph.get(nm, {}).get(kk, ()):
+                    if p in ("warmup", "other") or (p == "warmuse" and kk != k):
+                        return None  # read while dialects were set up or outside tests
+                v = acc.get(nm, {}).get(kk)
+                if v:
+                    m |= int(v, 16)
+    return m
 
 def import_only_mask(path, ln, by_file):
     """For a core line that runs while modules load: if it runs only during the
