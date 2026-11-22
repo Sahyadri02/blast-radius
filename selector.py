@@ -1562,6 +1562,7 @@ def import_only_mask(path, ln, by_file):
     return m
 
 def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=None):
+    return 0  # EXPERIMENT: no broad fallback for import-time lines (measurement only)
     if text is not None and ln is not None and foreign_write(text, ln):
         return ALL
     if stem_of(path) is None and ln is not None and text is not None:
