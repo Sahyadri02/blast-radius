@@ -872,7 +872,11 @@ def run_phase(pool, plans, tests, ms):
         log(cid, "ran", len(run), "est", round(est, 2), "cpu", pool.cpu.get(cid), "fail", len(fails))
     return out
 
+RISKY = ("sqlglot/optimizer/", "sqlglot/executor/", "sqlglot/planner.py", "sqlglot/serde.py",
+         "sqlglot/expressions/", "sqlglot/tokenizer_core.py", "sqlglot/trie.py", "sqlglot/schema.py")
+
 def _dialect_only(patch):
+    """GAMBLE: run the slow tests only when a changed file is where slow tests have failed before."""
     try:
         import re as _re
         fs = _re.findall(r"^diff --git a/(\S+)", patch.read_text(errors="replace"), _re.M)
@@ -880,13 +884,7 @@ def _dialect_only(patch):
         return False
     if not fs:
         return False
-    for f in fs:
-        parts = f.split("/")
-        if len(parts) != 3 or parts[0] != "sqlglot" or parts[1] not in ("dialects", "parsers", "generators", "typing"):
-            return False
-        if parts[2] in ("dialect.py", "__init__.py"):
-            return False
-    return True
+    return not any(f.startswith(RISKY) for f in fs)
 
 def main():
     import gc, time
