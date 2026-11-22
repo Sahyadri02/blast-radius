@@ -212,9 +212,10 @@ def _class(h, cls, depth):
         h.update(b";")
 
 
-def detail():
+def detail(with_body=True):
     """Per-table view of import-time state:
     {"c": {table: {key: digest}}, "e": {set: ["#set"|"#frozenset", element keys...]},
+     "f": {function: [core digest, defaults digest, file, body lines]},
      "s": {class: {ATTR: [digest, definer]}}, "a": {name: digest}}.
     Tables are exact dicts with nameable keys; "e" holds sets whose elements all have a
     stable key; "s" holds the scalar UPPER_CASE settings every Dialect/Tokenizer/Parser/
@@ -231,7 +232,8 @@ def detail():
     from brtrack import walk_tables, krepr, set_keys, named_classes, family_classes, \
         resolved_scalars, is_scalar, _UPPER
     mods = {n: sys.modules[n] for n in sys.modules if n == "sqlglot" or n.startswith("sqlglot.")}
-    c, a, e = {}, {}, {}
+    c, a, e, f = {}, {}, {}, {}
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(sqlglot.__file__)))
     names = named_classes(mods)
     fam = {id(k) for k in family_classes(names)}
     seen_cls = set()
@@ -271,12 +273,76 @@ def detail():
                 continue
         if is_class and id(owner) in fam and _UPPER.match(attr) and is_scalar(v):
             continue  # in "s", resolved per class
+        fe = _func_entry(v, attr, dig, root_dir, with_body)
+        if fe is not None:
+            f[name] = fe
+            continue
         a[name] = dig(v)
     s = resolved_scalars(names)
-    return {"c": c, "a": a, "e": e, "s": s}
+    return {"c": c, "a": a, "e": e, "s": s, "f": f}
+
+
+def _func_entry(v, attr, dig, root_dir, with_body=True):
+    """[core digest, defaults digest, file, body lines] for a plain function (or a
+    classmethod/staticmethod around one) defined in sqlglot; None for anything else.
+    The core digest is everything fp hashes for a function except its defaults (kind,
+    module, qualname, closure contents), so a change in the defaults alone is visible as
+    such: it can only matter to calls, and every call runs a body line."""
+    import os
+    kind = type(v).__name__
+    fn = v.__func__ if isinstance(v, (classmethod, staticmethod)) else v
+    if type(fn) is not types.FunctionType or attr.startswith("__"):
+        return None
+    co = fn.__code__
+    path = os.path.abspath(co.co_filename)
+    if not path.startswith(root_dir + os.sep):
+        return None
+    rel = os.path.relpath(path, root_dir)
+    h = hashlib.blake2b(digest_size=8)
+    h.update(kind.encode()); h.update(b"|")
+    h.update((fn.__module__ or "").encode()); h.update(b"."); h.update(fn.__qualname__.encode())
+    if fn.__closure__:
+        h.update(b"L")
+        for cell in fn.__closure__:
+            try:
+                _feed(h, cell.cell_contents, 1, set())
+            except ValueError:
+                h.update(b"<empty>")
+    dd, kd = fn.__defaults__, fn.__kwdefaults__
+    dflt = ("d" + dig(dd) if dd is not None else "-") + ("k" + dig(kd) if kd is not None else "-")
+    if not with_body:
+        return [h.hexdigest(), dflt, rel]
+    # body lines: every line of the code object after the def/decorator line
+    lines = sorted({ln for _, _, ln in co.co_lines() if ln})
+    body = [ln for ln in lines if ln > co.co_firstlineno]
+    return [h.hexdigest(), dflt, rel, body]
 
 
 if __name__ == "__main__":
+    if sys.argv[1] == "--detail-diff":
+        # python fp.py --detail-diff BASE.json ROOT: only what differs from BASE, as
+        # {section: {name: value, or null when ROOT has no such name}}
+        base_path, root = sys.argv[2], sys.argv[3]
+        sys.path.insert(0, root)
+        import io
+        real = sys.stdout
+        sys.stdout = io.StringIO()
+        try:
+            fp = detail(with_body=False)  # body lines come from the base file
+        finally:
+            sys.stdout = real
+        with open(base_path) as fh:
+            base = json.load(fh)
+        out = {}
+        for sec in set(base) | set(fp):
+            b, g = base.get(sec, {}), fp.get(sec, {})
+            if sec == "f":
+                out[sec] = {n: g.get(n) for n in set(b) | set(g)
+                            if (b.get(n) or [None])[:3] != (g.get(n) or [None])[:3]}
+            else:
+                out[sec] = {n: g.get(n) for n in set(b) | set(g) if b.get(n) != g.get(n)}
+        print(json.dumps(out, sort_keys=True))
+        raise SystemExit(0)
     if sys.argv[1] == "--detail":
         root = sys.argv[2]
         sys.path.insert(0, root)

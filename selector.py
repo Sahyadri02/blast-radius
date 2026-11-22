@@ -1381,6 +1381,25 @@ TABLES = {}
 def _fp_run(root, detail=False):
     import subprocess
     env = dict(os.environ, PYTHONHASHSEED="0", PYTHONDONTWRITEBYTECODE="1")
+    base_file = APP / "fp_detail.json"
+    if detail and root != SRC and base_file.exists() and _FP.get("dbase_from_file"):
+        # the child compares against the same base file and prints only the differences
+        r = subprocess.run([sys.executable, "-B", str(APP / "fp.py"), "--detail-diff", str(base_file), str(root)],
+                           capture_output=True, text=True, timeout=60, env=env)
+        if r.returncode != 0:
+            return None
+        diff = json.loads(r.stdout)
+        base = _FP["dbase"]
+        got = {}
+        for sec in set(base) | set(diff):
+            d = dict(base.get(sec, {}))
+            for n, v in diff.get(sec, {}).items():
+                if v is None:
+                    d.pop(n, None)
+                else:
+                    d[n] = v
+            got[sec] = d
+        return got
     r = subprocess.run([sys.executable, "-B", str(APP / "fp.py")] + (["--detail"] if detail else []) + [str(root)],
                        capture_output=True, text=True, timeout=60, env=env)
     if r.returncode != 0:
@@ -1416,7 +1435,10 @@ def table_diff():
     try:
         if _FP.get("dbase") is None:
             f = APP / "fp_detail.json"
-            _FP["dbase"] = json.loads(f.read_text()) if f.exists() else _fp_run(SRC, True)
+            if f.exists():
+                _FP["dbase"] = json.loads(f.read_text()); _FP["dbase_from_file"] = True
+            else:
+                _FP["dbase"] = _fp_run(SRC, True)
         changed = _FP["cur"] or {}
         base = _FP["dbase"]
         if base and changed:
@@ -1468,9 +1490,19 @@ def table_diff():
                         if X in y and x[X][0] == y[X][0]:
                             continue  # same value, now defined elsewhere
                         S.append((ck, X, x[X][1]))
-                res = (D, A, E, S)
+                # functions whose defaults alone changed (the same function otherwise)
+                F = []
+                bf, gf = base.get("f", {}), got.get("f", {})
+                for n in set(bf) | set(gf):
+                    x, y = bf.get(n), gf.get(n)
+                    if x is not None and y is not None and x[:2] == y[:2]:
+                        continue  # same function (its body moved or changed: line coverage)
+                    if x is None or y is None or x[0] != y[0]:
+                        A.append(n); continue  # appeared, vanished, or changed beyond its defaults
+                    F.append((n, x[2], x[3]))  # file and body lines of the base function
+                res = (D, A, E, S, F)
         elif base and not changed:
-            res = ([], [], [], [])
+            res = ([], [], [], [], [])
     except Exception as e:
         log("table diff error", repr(e))
         res = None
@@ -1490,8 +1522,24 @@ def table_mask():
     d = table_diff()
     if d is None or d[1] or not TABLES:
         return None
-    D, E, S = d[0], d[2], d[3]
+    D, E, S, F = d[0], d[2], d[3], d[4]
     m = 0
+    for n, path, body in F:
+        # a changed default matters only to calls, and every call runs a body line: the
+        # tests that ran one. Calls made while modules loaded built import-time state,
+        # which the fingerprint compares (any difference there is unexplained above);
+        # not if the body also ran while dialects were set up or test files were
+        # collected (results kept from those runs are not in the fingerprint).
+        ph = PHASES.get(path, {})
+        fl = NARROW[0].get(path, {}) if NARROW[0] is not None else None
+        if fl is None or not body:
+            return None
+        for ln in body:
+            if set(ph.get(str(ln), ())) - {"import"}:
+                return None
+            v = fl.get(str(ln))
+            if v:
+                m |= int(v, 16)
     if D:
         acc, ph, alias, leaky, derived = TABLES["tacc"], TABLES["tphase"], TABLES["talias"], TABLES["tleaky"], TABLES["tderived"]
         for n, k, keyset_changed in D:
@@ -1562,7 +1610,6 @@ def import_only_mask(path, ln, by_file):
     return m
 
 def import_fallback(path, filemask, by_file, ALL, text=None, ln=None, CLASSES=None):
-    return 0  # EXPERIMENT: no broad fallback for import-time lines (measurement only)
     if text is not None and ln is not None and foreign_write(text, ln):
         return ALL
     if stem_of(path) is None and ln is not None and text is not None:
